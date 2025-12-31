@@ -4,6 +4,7 @@ export interface Geometry {
 }
 
 export interface Feature {
+    type?: string
     id: string
     geometry: Geometry
     properties: Record<string, unknown>

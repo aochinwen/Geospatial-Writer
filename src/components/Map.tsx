@@ -95,9 +95,13 @@ export default function MapComponent() {
     // from drawRef.current.getAll().
     const syncFeaturesList = React.useCallback(() => {
         if (drawRef.current) {
-            setFeaturesList(drawRef.current.getAll().features)
+            const allFeatures = drawRef.current.getAll().features.map(f => ({
+                ...f,
+                project_id: (f.properties?.project_id as string) || activeProject?.id || ''
+            })) as Feature[]
+            setFeaturesList(allFeatures)
         }
-    }, [])
+    }, [activeProject])
 
     const supabase = createClient()
     const router = useRouter()
@@ -152,9 +156,9 @@ export default function MapComponent() {
             // 4. Add/Update Features
             if (dbFeatures.length > 0) {
                 const fc = {
-                    type: 'FeatureCollection',
+                    type: 'FeatureCollection' as const,
                     features: dbFeatures.map(f => ({
-                        type: 'Feature',
+                        type: 'Feature' as const,
                         id: f.id,
                         geometry: f.geometry,
                         properties: f.properties
@@ -163,7 +167,7 @@ export default function MapComponent() {
 
                 // Prevent selection change handlers from firing during this sync
                 isSwapping.current = true;
-                draw?.add?.(fc);
+                draw?.add?.(fc as any);
                 isSwapping.current = false;
             }
             syncFeaturesList()
@@ -265,8 +269,9 @@ export default function MapComponent() {
                 if (drawRef.current) {
                     drawRef.current.add({
                         ...feature,
+                        type: 'Feature',
                         properties: initialProps
-                    })
+                    } as any)
                 }
                 syncFeaturesList()
                 return;
@@ -289,7 +294,7 @@ export default function MapComponent() {
                         project_id: activeProject?.id || ''
                     };
                     // Mapbox Draw expects a specific format, Feature matches enough
-                    drawRef.current.add(newFeature);
+                    drawRef.current.add(newFeature as any);
 
                     // Select the new feature immediately so UI is ready
                     drawRef.current.changeMode('simple_select', { featureIds: [newId] });
@@ -426,8 +431,9 @@ export default function MapComponent() {
             // Merge new props into feature for the insert payload
             const featureToSave = {
                 ...feature,
-                properties: { ...feature.properties, ...newProps }
-            };
+                properties: { ...feature.properties, ...newProps },
+                project_id: activeProject.id
+            } as Feature;
 
             try {
                 const data = await insertFeature(featureToSave, activeProject.id);
@@ -470,8 +476,9 @@ export default function MapComponent() {
             if (f) {
                 drawRef.current.add({
                     ...f,
+                    type: 'Feature',
                     properties: newProps
-                })
+                } as any)
             }
         }
 
@@ -509,9 +516,13 @@ export default function MapComponent() {
         if (geom.type === 'Point') {
             mapRef.current?.flyTo({ center: geom.coordinates as [number, number], zoom: 15 });
         } else if (geom.type === 'LineString' && geom.coordinates.length > 0) {
-            mapRef.current?.flyTo({ center: geom.coordinates[0] as [number, number], zoom: 15 });
-        } else if (geom.type === 'Polygon' && geom.coordinates.length > 0 && geom.coordinates[0].length > 0) {
-            mapRef.current?.flyTo({ center: geom.coordinates[0][0] as [number, number], zoom: 15 });
+            const coords = geom.coordinates as number[][];
+            mapRef.current?.flyTo({ center: coords[0] as [number, number], zoom: 15 });
+        } else if (geom.type === 'Polygon' && geom.coordinates.length > 0) {
+            const coords = geom.coordinates as number[][][];
+            if (coords[0].length > 0) {
+                mapRef.current?.flyTo({ center: coords[0][0] as [number, number], zoom: 15 });
+            }
         }
     }
 
@@ -556,7 +567,7 @@ export default function MapComponent() {
         // We filter for features that are likely ours (e.g. have an ID or geometry)
         // Note: mapbox-gl-draw layers usually start with 'gl-draw'
         const features = event.target.queryRenderedFeatures(point);
-        const drawFeature = features.find((f: Feature) => f.source && String(f.source).includes('mapbox-gl-draw'));
+        const drawFeature = features.find((f) => f.source && String(f.source).includes('mapbox-gl-draw'));
 
         if (drawFeature) {
             setHoverInfo({
@@ -649,7 +660,7 @@ export default function MapComponent() {
                                             const confirmDelete = window.confirm("Delete this feature?");
                                             if (!confirmDelete) return;
 
-                                            onDelete({ features: [{ id: f.id }] });
+                                            onDelete({ features: [f] });
                                             if (drawRef.current) drawRef.current.delete(f.id);
                                         }}
                                     >
@@ -896,7 +907,7 @@ export default function MapComponent() {
                             onDelete={() => {
                                 // Double confirmation removed - AttributeEditor handles the UI
                                 // Call onDelete with structure expected by Mapbox Draw / our handler
-                                onDelete({ features: [{ id: selectedFeatureId }] })
+                                onDelete({ features: [{ id: selectedFeatureId } as Feature] })
                                 // Also remove from draw instance locally
                                 if (drawRef.current) {
                                     drawRef.current.delete(selectedFeatureId)
