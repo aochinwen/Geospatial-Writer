@@ -1,7 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import React, { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -36,10 +35,14 @@ interface AttributeEditorProps {
 }
 
 export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onDelete, onClose, onCreateAnother }: AttributeEditorProps) {
-    const [attributes, setAttributes] = useState<KeyValue[]>([])
+    const [attributes, setAttributes] = useState<KeyValue[]>(() =>
+        Object.entries(initialProperties).map(([key, value]) => ({
+            key,
+            value: String(value)
+        }))
+    )
     const { templates, user } = useTemplates()
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-    const [isDirty, setIsDirty] = useState(false)
     const [selectedTemplate, setSelectedTemplate] = useState<string>('')
 
     // Helper to check dirtiness
@@ -57,29 +60,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         return false;
     };
 
-    useEffect(() => {
-        const attrs = Object.entries(initialProperties).map(([key, value]) => ({
-            key,
-            value: String(value)
-        }))
-        setAttributes(attrs)
-        setIsDirty(false)
-        setSelectedTemplate('') // Reset template selection on new feature load
-    }, [initialProperties, featureId])
-
-    useEffect(() => {
-        setIsDirty(checkDirty(attributes, initialProperties));
-    }, [attributes, initialProperties])
-
-    const handleAdd = () => {
-        setAttributes([...attributes, { key: '', value: '' }])
-    }
-
-    const handleDelete = (index: number) => {
-        const newAttrs = [...attributes]
-        newAttrs.splice(index, 1)
-        setAttributes(newAttrs)
-    }
+    const isDirty = checkDirty(attributes, initialProperties);
 
     const handleChange = (index: number, field: 'key' | 'value', value: string) => {
         const newAttrs = [...attributes]
@@ -94,7 +75,8 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
             props[attr.key] = attr.value
         }
         onSave(featureId, props)
-        setIsDirty(false) // Assuming save is optimistic/successful for UI state
+        // No need to set isDirty(false) because parent will likely update initialProperties
+        // causing re-render/remount or attributes will match new initialProps
     }
 
     const handleApplyTemplate = (templateId: string) => {
