@@ -124,12 +124,12 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         const type = featureGeometry.type;
         let details = '';
         if (type === 'Point') {
-            const [lng, lat] = featureGeometry.coordinates;
+            const [lng, lat] = featureGeometry.coordinates as number[];
             details = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
         } else if (type === 'LineString') {
-            details = `${featureGeometry.coordinates.length} points`; // Maybe show first/last?
+            details = `${(featureGeometry.coordinates as number[][]).length} points`; // Maybe show first/last?
         } else if (type === 'Polygon') {
-            details = `${featureGeometry.coordinates[0].length} points (closed)`;
+            details = `${(featureGeometry.coordinates as number[][][])[0].length} points (closed)`;
         }
         return { type, details };
     }

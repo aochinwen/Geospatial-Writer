@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import MapGL, { NavigationControl, useControl, MapRef, Popup } from 'react-map-gl/mapbox'
+import MapGL, { NavigationControl, useControl, MapRef, Popup, ControlPosition } from 'react-map-gl/mapbox'
 import MapboxDraw from '@mapbox/mapbox-gl-draw'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css'
@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation'
 
 import AttributeEditor from './AttributeEditor'
 import { TemplateManager } from './TemplateManager'
+import { Feature } from '@/types'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 
@@ -25,7 +26,7 @@ function DrawControl(props: {
     onUpdate?: (e: { features: any[] }) => void
     onDelete?: (e: { features: any[] }) => void
     onSelectionChange?: (e: { features: any[] }) => void
-    position?: string
+    position?: ControlPosition
     displayControlsDefault?: boolean
     controls?: Record<string, boolean>
     forwardedRef?: any
@@ -62,7 +63,7 @@ const ForwardedDrawControl = React.forwardRef((props: {
     onUpdate?: (e: { features: any[] }) => void
     onDelete?: (e: { features: any[] }) => void
     onSelectionChange?: (e: { features: any[] }) => void
-    position?: string
+    position?: ControlPosition
     displayControlsDefault?: boolean
     controls?: Record<string, boolean>
 }, ref) => (
