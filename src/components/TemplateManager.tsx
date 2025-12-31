@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTemplates } from '@/hooks/useTemplates'
-import { Trash2, Check, Plus, ArrowLeft } from 'lucide-react'
+import { Trash2, Check, Plus, ArrowLeft, X } from 'lucide-react'
 
 interface TemplateManagerProps {
     onApplyParams?: (properties: Record<string, any>) => void
@@ -13,9 +13,10 @@ interface TemplateManagerProps {
 }
 
 export function TemplateManager({ onApplyParams, trigger }: TemplateManagerProps) {
-    const { templates, loading, deleteTemplate, createTemplate } = useTemplates()
+    const { templates, loading, deleteTemplate, createTemplate, user } = useTemplates()
     const [open, setOpen] = useState(false)
     const [view, setView] = useState<'list' | 'create'>('list')
+    const [templateToDelete, setTemplateToDelete] = useState<string | null>(null)
 
     // Create Form State
     const [newName, setNewName] = useState('')
@@ -40,6 +41,7 @@ export function TemplateManager({ onApplyParams, trigger }: TemplateManagerProps
     const onOpenChange = (isOpen: boolean) => {
         setOpen(isOpen)
         if (!isOpen) {
+            setTemplateToDelete(null)
             setTimeout(() => setView('list'), 300) // Small delay to avoid flicker during cloud
         }
     }
@@ -76,36 +78,96 @@ export function TemplateManager({ onApplyParams, trigger }: TemplateManagerProps
                                 </div>
                             ) : (
                                 <div className="flex-1 overflow-y-auto pr-4">
-                                    <div className="space-y-2 p-1">
-                                        {templates.map(template => (
-                                            <div key={template.id} className="flex flex-col border rounded-lg p-3 hover:bg-accent/50 transition-colors">
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="font-medium text-sm">{template.name}</span>
-                                                    <div className="flex gap-2">
-                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            if (confirm('Delete template?')) deleteTemplate(template.id)
-                                                        }}>
-                                                            <Trash2 className="h-3 w-3" />
-                                                        </Button>
-                                                        {onApplyParams && (
-                                                            <Button size="sm" onClick={() => {
-                                                                onApplyParams(template.properties)
-                                                                setOpen(false)
-                                                            }}>
-                                                                <Check className="mr-2 h-3 w-3" /> Apply
-                                                            </Button>
-                                                        )}
+                                    {/* My Templates */}
+                                    {templates.some(t => t.user_id === user?.id) && (
+                                        <div className="mb-4">
+                                            <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-1 uppercase tracking-wider">My Templates</h3>
+                                            <div className="space-y-2 p-1">
+                                                {templates.filter(t => t.user_id === user?.id).map(template => (
+                                                    <div key={template.id} className="flex flex-col border rounded-lg p-3 hover:bg-accent/50 transition-colors">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <span className="font-medium text-sm">{template.name}</span>
+                                                            <div className="flex gap-2">
+                                                                {templateToDelete === template.id ? (
+                                                                    <div className="flex items-center gap-1 bg-destructive/10 rounded px-1">
+                                                                        <span className="text-[10px] text-destructive font-semibold px-1">Confirm?</span>
+                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:bg-destructive/20" onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            deleteTemplate(template.id)
+                                                                            setTemplateToDelete(null)
+                                                                        }}>
+                                                                            <Check className="h-3 w-3" />
+                                                                        </Button>
+                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            setTemplateToDelete(null)
+                                                                        }}>
+                                                                            <X className="h-3 w-3" />
+                                                                        </Button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => {
+                                                                        e.stopPropagation()
+                                                                        setTemplateToDelete(template.id)
+                                                                    }}>
+                                                                        <Trash2 className="h-3 w-3" />
+                                                                    </Button>
+                                                                )}
+                                                                {onApplyParams && (
+                                                                    <Button size="sm" onClick={() => {
+                                                                        onApplyParams(template.properties)
+                                                                        setOpen(false)
+                                                                    }}>
+                                                                        <Check className="mr-2 h-3 w-3" /> Apply
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded max-h-20 overflow-hidden text-ellipsis">
+                                                            {Object.entries(template.properties).map(([k, v]) => (
+                                                                <div key={k} className="truncate">{k}: {String(v)}</div>
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded max-h-20 overflow-hidden text-ellipsis">
-                                                    {Object.entries(template.properties).map(([k, v]) => (
-                                                        <div key={k} className="truncate">{k}: {String(v)}</div>
-                                                    ))}
-                                                </div>
+                                                ))}
                                             </div>
-                                        ))}
-                                    </div>
+                                        </div>
+                                    )}
+
+                                    {/* Other Templates */}
+                                    {templates.some(t => t.user_id !== user?.id) && (
+                                        <div>
+                                            <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-1 uppercase tracking-wider">Shared Templates</h3>
+                                            <div className="space-y-2 p-1">
+                                                {templates.filter(t => t.user_id !== user?.id).map(template => (
+                                                    <div key={template.id} className="flex flex-col border rounded-lg p-3 hover:bg-accent/50 transition-colors opacity-90">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <div className="flex flex-col">
+                                                                <span className="font-medium text-sm">{template.name}</span>
+                                                                <span className="text-[10px] text-muted-foreground">by others</span>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                {/* No delete button for shared templates */}
+                                                                {onApplyParams && (
+                                                                    <Button size="sm" variant="secondary" onClick={() => {
+                                                                        onApplyParams(template.properties)
+                                                                        setOpen(false)
+                                                                    }}>
+                                                                        <Check className="mr-2 h-3 w-3" /> Apply
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded max-h-20 overflow-hidden text-ellipsis">
+                                                            {Object.entries(template.properties).map(([k, v]) => (
+                                                                <div key={k} className="truncate">{k}: {String(v)}</div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </>

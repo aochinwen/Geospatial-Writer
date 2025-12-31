@@ -12,6 +12,7 @@ type TemplateContextType = {
     createTemplate: (name: string, properties: Record<string, any>) => Promise<FeatureTemplate | undefined>
     deleteTemplate: (id: string) => Promise<void>
     refreshTemplates: () => Promise<void>
+    user: User | null
 }
 
 const TemplateContext = createContext<TemplateContextType | undefined>(undefined)
@@ -96,7 +97,7 @@ export function TemplateProvider({ children, user }: { children: React.ReactNode
     }
 
     return (
-        <TemplateContext.Provider value={{ templates, loading, createTemplate, deleteTemplate, refreshTemplates: fetchTemplates }}>
+        <TemplateContext.Provider value={{ templates, loading, createTemplate, deleteTemplate, refreshTemplates: fetchTemplates, user }}>
             {children}
         </TemplateContext.Provider>
     )
