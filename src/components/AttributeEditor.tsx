@@ -7,9 +7,16 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Plus, Trash, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { TemplateManager } from '@/components/TemplateManager'
-import { SaveTemplateDialog } from '@/components/SaveTemplateDialog'
 import { useTemplates } from '@/hooks/useTemplates'
+import {
+    Select,
+    SelectContent,
+    SelectGroup,
+    SelectItem,
+    SelectLabel,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select"
 
 export type KeyValue = {
     key: string
@@ -28,9 +35,10 @@ interface AttributeEditorProps {
 
 export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onDelete, onClose, onCreateAnother }: AttributeEditorProps) {
     const [attributes, setAttributes] = useState<KeyValue[]>([])
-    const { createTemplate } = useTemplates()
+    const { templates, user } = useTemplates()
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [isDirty, setIsDirty] = useState(false)
+    const [selectedTemplate, setSelectedTemplate] = useState<string>('')
 
     // Helper to check dirtiness
     const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, any>) => {
@@ -54,6 +62,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         }))
         setAttributes(attrs)
         setIsDirty(false)
+        setSelectedTemplate('') // Reset template selection on new feature load
     }, [initialProperties, featureId])
 
     useEffect(() => {
@@ -86,6 +95,26 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         setIsDirty(false) // Assuming save is optimistic/successful for UI state
     }
 
+    const handleApplyTemplate = (templateId: string) => {
+        const template = templates.find(t => t.id === templateId)
+        if (!template) return
+
+        setSelectedTemplate(templateId)
+
+        const newAttrs = [...attributes];
+        // Merge props: update if exists, append if not
+        Object.entries(template.properties).forEach(([k, v]) => {
+            const existing = newAttrs.find(a => a.key === k);
+            if (existing) {
+                existing.value = String(v);
+            } else {
+                newAttrs.push({ key: k, value: String(v) });
+            }
+        });
+        setAttributes(newAttrs);
+        toast.success(`Template "${template.name}" applied`)
+    }
+
 
     // Geometry Helper
     const getGeometryInfo = () => {
@@ -104,6 +133,9 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     }
 
     const geoInfo = getGeometryInfo();
+
+    const myTemplates = templates.filter(t => t.user_id === user?.id)
+    const sharedTemplates = templates.filter(t => t.user_id !== user?.id)
 
     return (
         <div className="h-full flex flex-col">
@@ -159,40 +191,50 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
             </div>
 
             <div className="pt-4 mt-4 border-t space-y-2">
-                {/* Template Controls */}
-                <div className="flex gap-2">
-                    <TemplateManager
-                        trigger={<Button variant="outline" size="sm" className="flex-1">Load Template</Button>}
-                        onApplyParams={(props) => {
-                            const newAttrs = [...attributes];
-                            // Merge props: update if exists, append if not
-                            Object.entries(props).forEach(([k, v]) => {
-                                const existing = newAttrs.find(a => a.key === k);
-                                if (existing) {
-                                    existing.value = String(v);
-                                } else {
-                                    newAttrs.push({ key: k, value: String(v) });
-                                }
-                            });
-                            setAttributes(newAttrs);
-                            toast.success('Template applied locally (Save to persist)');
-                        }} />
-
-                    <SaveTemplateDialog
-                        trigger={<Button variant="outline" size="sm" className="flex-1">Save as Template</Button>}
-                        properties={attributes.reduce((acc, curr) => {
-                            if (curr.key) acc[curr.key] = curr.value;
-                            return acc;
-                        }, {} as Record<string, any>)}
-                        onSave={async (name, propsToSave) => {
-                            await createTemplate(name, propsToSave);
-                        }}
-                    />
+                {/* Template Selection */}
+                <div className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground ml-1">Load Template</span>
+                    <Select value={selectedTemplate} onValueChange={handleApplyTemplate}>
+                        <SelectTrigger className="h-8 text-xs w-full">
+                            <SelectValue placeholder="Select a template..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {myTemplates.length > 0 && (
+                                <SelectGroup>
+                                    <SelectLabel>My Templates</SelectLabel>
+                                    {myTemplates.map(t => (
+                                        <SelectItem key={t.id} value={t.id} className="text-xs">
+                                            {t.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            )}
+                            {sharedTemplates.length > 0 && (
+                                <SelectGroup>
+                                    <SelectLabel>Shared Templates</SelectLabel>
+                                    {sharedTemplates.map(t => (
+                                        <SelectItem key={t.id} value={t.id} className="text-xs">
+                                            {t.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            )}
+                            {templates.length === 0 && (
+                                <div className="p-2 text-xs text-muted-foreground text-center">No templates available</div>
+                            )}
+                        </SelectContent>
+                    </Select>
+                    {selectedTemplate && (
+                        <div className="text-[10px] text-muted-foreground px-1">
+                            Applied: <span className="font-medium text-foreground">{templates.find(t => t.id === selectedTemplate)?.name}</span>
+                        </div>
+                    )}
                 </div>
 
                 <Button onClick={handleSave} size="sm" className="w-full" disabled={!isDirty}>
                     <Save className="mr-2 h-3 w-3" /> Save Changes
                 </Button>
+
 
                 <Button
                     variant="secondary"

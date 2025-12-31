@@ -37,7 +37,7 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 - **Deferred Saving**: Features start as local drafts and are only saved to the database upon user confirmation.
 - **Resource Management**: Delete projects and features directly from the UI with custom confirmation dialogs.
 - **Attribute Editing**: Floating panel to manage feature properties with real-time validation.
-- **Feature Templates**: Create reuseable property templates for faster data entry. Supports "My Templates" and "Shared Templates" (view-only).
+- **Feature Templates**: Manage reuseable property templates via the "Manage Global Templates" interface. Apply templates using a convenient dropdown in the Attribute Editor, with clear indication of the currently active template. Supports "My Templates" and "Shared Templates".
 - **Workflow Optimization**: "Create Another" button to quickly add multiple similar features.
 
 ## Deploy on Vercel
