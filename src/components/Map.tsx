@@ -894,7 +894,12 @@ export default function MapComponent() {
                                     setSelectedFeatureId(null)
                                 }
                             }}
-                            onClose={() => setSelectedFeatureId(null)}
+                            onClose={() => {
+                                setSelectedFeatureId(null)
+                                if (drawRef.current) {
+                                    drawRef.current.changeMode('simple_select', { featureIds: [] })
+                                }
+                            }}
                             onCreateAnother={handleCreateAnother}
                         />
                     </div>
