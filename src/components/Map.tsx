@@ -15,6 +15,7 @@ import { createClient } from '@/utils/supabase/client'
 import { toast } from 'sonner'
 
 import AttributeEditor from './AttributeEditor'
+import { TemplateManager } from './TemplateManager'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 
@@ -66,6 +67,8 @@ export default function MapComponent() {
     const [selectedFeatureId, setSelectedFeatureId] = React.useState<string | null>(null)
     const [selectedFeatureProps, setSelectedFeatureProps] = React.useState<Record<string, any>>({})
     const [featuresList, setFeaturesList] = React.useState<any[]>([])
+    // New: for "Create Another" workflow
+    const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, any> | null>(null)
 
     // Capture features from Context (DB) OR from Draw updates
     // Actually, simple solution: whenever Draw updates (Create, Delete, Update), we set 'featuresList' 
@@ -84,41 +87,41 @@ export default function MapComponent() {
 
     // EFFECT: Handle Project Switching - Load Data
     React.useEffect(() => {
-        if (drawRef.current && activeProject && dbFeatures) {
+        const draw = drawRef.current;
+        if (draw && activeProject && dbFeatures) {
             // Smart Sync: Diff instead of clear-all
 
             // 1. Get current Draw IDs
-            const currentIds = new Set(drawRef.current.getAll().features.map(f => f.id as string));
+            const collection = draw?.getAll?.() || { features: [] };
+            const currentIds = new Set(collection.features.map(f => f.id as string));
 
             // 2. Identify DB IDs
             const dbIds = new Set(dbFeatures.map(f => f.id));
 
-            // 3. Delete features in Draw but not in DB (unless they are session features? No, activeProject is truthy, so DB is source of truth)
-            // But wait! If we are in the middle of creating, we might have a Temp ID that hasn't swapped yet?
-            // Usually onCreate handles this before refreshFeatures updates dbFeatures.
-            // But if there's lag, we might delete a just-drawn feature.
-            // We'll trust dbFeatures is authoritative for 'activeProject'.
-
+            // 3. Delete features in Draw but not in DB
             const toDelete: string[] = [];
             currentIds.forEach(id => {
                 // Check if it's a UUID (DB feature) or Temp
                 const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
                 // Only delete if it IS a UUID (claiming to be from DB) but NOT in the DB list.
-                // If it is NOT a UUID, it is a local Draft, so preserve it.
+                // FAILSAFE: Never delete the currently selected feature during sync (prevents UI disappear on race conditions)
                 if (id && isUUID && !dbIds.has(id)) {
-                    toDelete.push(id);
+                    if (id === selectedFeatureId) {
+                        console.log('SAFEGUARD: Prevented Deletion of Selected Feature', id);
+                    } else {
+                        toDelete.push(id);
+                    }
                 }
             });
 
             if (toDelete.length > 0) {
-                // We should NOT trigger onDelete logic (DB delete) for these sync-cleanups
                 isSwapping.current = true;
-                drawRef.current.delete(toDelete);
+                draw?.delete?.(toDelete);
                 isSwapping.current = false;
             }
 
-            // 4. Add/Update DB features
+            // 4. Add/Update Features
             if (dbFeatures.length > 0) {
                 const fc: any = {
                     type: 'FeatureCollection',
@@ -129,13 +132,16 @@ export default function MapComponent() {
                         properties: f.properties
                     }))
                 }
-                // add triggers 'update' maybe? No.
-                // It overwrites.
-                drawRef.current.add(fc)
+
+                // Prevent selection change handlers from firing during this sync
+                isSwapping.current = true;
+                draw?.add?.(fc);
+                isSwapping.current = false;
             }
             syncFeaturesList()
         }
-    }, [activeProject, dbFeatures, syncFeaturesList])
+    }, [activeProject, dbFeatures]) // Dependency list separate from logic
+
 
     // Supabase Helpers
     const insertFeature = async (feature: any, projectId: string) => {
@@ -214,9 +220,26 @@ export default function MapComponent() {
         console.log('onCreate triggered', e);
         const { features } = e
         for (const feature of features) {
+
+            // Apply pending template if exists (from "Create Another")
+            let initialProps = feature.properties || {};
+            if (pendingTemplate) {
+                console.log('Applying pending template to new feature', pendingTemplate);
+                initialProps = { ...initialProps, ...pendingTemplate };
+                // Reset pending template
+                setPendingTemplate(null);
+            }
+
             if (!activeProject) {
                 console.log('No active project - keeping feature local');
                 toast.info('Feature added to local session')
+                // Update local props in draw if needed
+                if (drawRef.current) {
+                    drawRef.current.add({
+                        ...feature,
+                        properties: initialProps
+                    })
+                }
                 syncFeaturesList()
                 return;
             }
@@ -234,7 +257,7 @@ export default function MapComponent() {
                         type: 'Feature' as const,
                         id: newId,
                         geometry: feature.geometry,
-                        properties: feature.properties || {}
+                        properties: initialProps // Use merged props
                     };
                     drawRef.current.add(newFeature);
 
@@ -243,13 +266,15 @@ export default function MapComponent() {
                     setSelectedFeatureId(newId);
                     setSelectedFeatureProps(newFeature.properties);
                 } finally {
-                    isSwapping.current = false;
+                    setTimeout(() => {
+                        isSwapping.current = false;
+                    }, 50);
                 }
             }
 
             try {
                 // Now insert to DB with the correct ID
-                const featureWithId = { ...feature, id: newId };
+                const featureWithId = { ...feature, id: newId, properties: initialProps };
                 const data = await insertFeature(featureWithId, activeProject.id)
                 console.log('Feature saved to DB:', data);
                 toast.success('Feature saved')
@@ -263,7 +288,29 @@ export default function MapComponent() {
             }
         }
         syncFeaturesList()
-    }, [activeProject, refreshFeatures, syncFeaturesList])
+    }, [activeProject, refreshFeatures, syncFeaturesList, pendingTemplate]) // Added pendingTemplate dep
+
+    // New Handler for "Create Another"
+    const handleCreateAnother = (geometryType: string, currentProps: Record<string, any>) => {
+        if (!drawRef.current) return;
+
+        // set pending template keys (values empty)
+        const templateKeys = Object.keys(currentProps).reduce((acc, key) => {
+            acc[key] = '';
+            return acc;
+        }, {} as Record<string, any>);
+
+        setPendingTemplate(templateKeys);
+
+        // Start drawing mode
+        let mode = 'simple_select';
+        if (geometryType === 'Point') mode = 'draw_point';
+        else if (geometryType === 'LineString') mode = 'draw_line_string';
+        else if (geometryType === 'Polygon') mode = 'draw_polygon';
+
+        drawRef.current.changeMode(mode as any);
+        toast.info(`Draw a new ${geometryType} to apply template`);
+    }
 
     const onDelete = React.useCallback(async (e: any) => {
         if (isSwapping.current) return;
@@ -293,6 +340,8 @@ export default function MapComponent() {
         if (isSwapping.current) return;
 
         const { features } = e
+        console.log('onSelectionChange', features.length, features[0]?.id);
+
         if (features.length > 0) {
             const f = features[0]
             setSelectedFeatureId(f.id)
@@ -301,6 +350,24 @@ export default function MapComponent() {
             setSelectedFeatureId(null)
         }
     }, [])
+
+    // Event Refs to avoid stale closures in Mapbox listeners
+    const onCreateRef = React.useRef(onCreate);
+    const onUpdateRef = React.useRef(onUpdate);
+    const onDeleteRef = React.useRef(onDelete);
+    const onSelectionChangeRef = React.useRef(onSelectionChange);
+
+    // Update refs whenever callbacks change
+    React.useEffect(() => { onCreateRef.current = onCreate; }, [onCreate]);
+    React.useEffect(() => { onUpdateRef.current = onUpdate; }, [onUpdate]);
+    React.useEffect(() => { onDeleteRef.current = onDelete; }, [onDelete]);
+    React.useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
+
+    // Stable handlers to pass to DrawControl
+    const stableOnCreate = React.useCallback((e: any) => onCreateRef.current(e), []);
+    const stableOnUpdate = React.useCallback((e: any) => onUpdateRef.current(e), []);
+    const stableOnDelete = React.useCallback((e: any) => onDeleteRef.current(e), []);
+    const stableOnSelectionChange = React.useCallback((e: any) => onSelectionChangeRef.current(e), []);
 
     const handleAttributeSave = async (id: string, newProps: Record<string, any>) => {
         if (!activeProject) return;
@@ -345,7 +412,9 @@ export default function MapComponent() {
                     properties: data.properties
                 };
                 drawRef.current.add(newFeatureLocal);
-                isSwapping.current = false;
+                setTimeout(() => {
+                    isSwapping.current = false;
+                }, 50);
 
                 // Update UI selection
                 drawRef.current.changeMode('simple_select', { featureIds: [data.id] });
@@ -431,6 +500,22 @@ export default function MapComponent() {
         <div className="relative w-full h-full flex">
             {/* Top Left Project Controls */}
             <div className="absolute top-4 left-4 z-10 w-80 space-y-2 flex flex-col max-h-[calc(100%-2rem)]">
+                {/* Template Database Component */}
+                <Card className="shrink-0">
+                    <CardHeader className="p-4 pb-2">
+                        <CardTitle className="text-sm font-medium uppercase text-muted-foreground flex items-center gap-2">
+                            Template Library
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-2">
+                        <TemplateManager trigger={
+                            <Button variant="secondary" size="sm" className="w-full">
+                                <FolderOpen className="mr-2 h-4 w-4" /> Manage Global Templates
+                            </Button>
+                        } />
+                    </CardContent>
+                </Card>
+
                 <Card className="shrink-0">
                     <CardHeader className="p-4 pb-2">
                         <CardTitle className="text-sm font-medium uppercase text-muted-foreground">Current Project</CardTitle>
@@ -442,9 +527,10 @@ export default function MapComponent() {
                                     <span className="font-bold truncate">{activeProject.name}</span>
                                     <Button variant="ghost" size="sm" onClick={() => setIsProjectDialogOpen(true)}>Switch</Button>
                                 </div>
+
                                 <div className="flex gap-2">
-                                    <Button size="sm" variant="outline" className="w-full" onClick={() => setIsPreviewOpen(true)}>
-                                        Export GeoJSON
+                                    <Button size="sm" variant="outline" onClick={() => setIsPreviewOpen(true)} className="flex-1">
+                                        Export
                                     </Button>
                                 </div>
                             </>
@@ -634,24 +720,28 @@ export default function MapComponent() {
                             point: true,
                             line_string: true
                         }}
-                        onCreate={onCreate}
-                        onUpdate={onUpdate}
-                        onDelete={onDelete}
-                        onSelectionChange={onSelectionChange}
+                        onCreate={stableOnCreate}
+                        onUpdate={stableOnUpdate}
+                        onDelete={stableOnDelete}
+                        onSelectionChange={stableOnSelectionChange}
                     />
                 </Map>
             </div>
 
             {/* Attribute Editor - Floating Panel */}
-            {selectedFeatureId && (
-                <div className="absolute top-4 right-14 z-20 w-80 bg-background/95 backdrop-blur-sm shadow-lg rounded-lg border p-4 max-h-[80vh] overflow-y-auto">
-                    <AttributeEditor
-                        featureId={selectedFeatureId}
-                        initialProperties={selectedFeatureProps}
-                        featureGeometry={drawRef.current?.get(selectedFeatureId)?.geometry} // Pass geometry
-                        onSave={handleAttributeSave}
-                        onDelete={() => {
-                            if (confirm('Delete this feature?')) {
+            {
+                selectedFeatureId && (
+                    <div className="absolute top-4 right-14 z-20 w-96 bg-background/95 backdrop-blur-sm shadow-lg rounded-lg border p-4 max-h-[80vh] overflow-y-auto">
+                        <AttributeEditor
+                            featureId={selectedFeatureId}
+                            initialProperties={selectedFeatureProps}
+                            featureGeometry={
+                                featuresList.find(f => f.id === selectedFeatureId)?.geometry ||
+                                dbFeatures.find(f => f.id === selectedFeatureId)?.geometry
+                            } // Pass geometry
+                            onSave={handleAttributeSave}
+                            onDelete={() => {
+                                // Double confirmation removed - AttributeEditor handles the UI
                                 // Call onDelete with structure expected by Mapbox Draw / our handler
                                 onDelete({ features: [{ id: selectedFeatureId }] })
                                 // Also remove from draw instance locally
@@ -660,12 +750,13 @@ export default function MapComponent() {
                                     // Clear selection
                                     setSelectedFeatureId(null)
                                 }
-                            }
-                        }}
-                        onClose={() => setSelectedFeatureId(null)}
-                    />
-                </div>
-            )}
-        </div>
+                            }}
+                            onClose={() => setSelectedFeatureId(null)}
+                            onCreateAnother={handleCreateAnother}
+                        />
+                    </div>
+                )
+            }
+        </div >
     )
 }

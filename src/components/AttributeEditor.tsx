@@ -2,10 +2,14 @@
 
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Plus, Trash, Save } from 'lucide-react'
 import { toast } from 'sonner'
+import { TemplateManager } from '@/components/TemplateManager'
+import { SaveTemplateDialog } from '@/components/SaveTemplateDialog'
+import { useTemplates } from '@/hooks/useTemplates'
 
 export type KeyValue = {
     key: string
@@ -18,11 +22,30 @@ interface AttributeEditorProps {
     featureGeometry?: any // GeoJSON Geometry
     onSave: (id: string, properties: Record<string, any>) => void
     onDelete?: () => void
+    onCreateAnother: (geometryType: string, currentProps: Record<string, any>) => void
     onClose: () => void
 }
 
-export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onDelete, onClose }: AttributeEditorProps) {
+export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onDelete, onClose, onCreateAnother }: AttributeEditorProps) {
     const [attributes, setAttributes] = useState<KeyValue[]>([])
+    const { createTemplate } = useTemplates()
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [isDirty, setIsDirty] = useState(false)
+
+    // Helper to check dirtiness
+    const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, any>) => {
+        const currentObj: Record<string, string> = {};
+        currentAttrs.forEach(a => { if (a.key.trim()) currentObj[a.key] = a.value });
+
+        const initialObj: Record<string, string> = {};
+        Object.entries(initialProps).forEach(([k, v]) => initialObj[k] = String(v));
+
+        if (Object.keys(currentObj).length !== Object.keys(initialObj).length) return true;
+        for (const key in currentObj) {
+            if (currentObj[key] !== initialObj[key]) return true;
+        }
+        return false;
+    };
 
     useEffect(() => {
         const attrs = Object.entries(initialProperties).map(([key, value]) => ({
@@ -30,7 +53,12 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
             value: String(value)
         }))
         setAttributes(attrs)
+        setIsDirty(false)
     }, [initialProperties, featureId])
+
+    useEffect(() => {
+        setIsDirty(checkDirty(attributes, initialProperties));
+    }, [attributes, initialProperties])
 
     const handleAdd = () => {
         setAttributes([...attributes, { key: '', value: '' }])
@@ -55,8 +83,9 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
             props[attr.key] = attr.value
         }
         onSave(featureId, props)
-        // toast moved to parent for async success accuracy
+        setIsDirty(false) // Assuming save is optimistic/successful for UI state
     }
+
 
     // Geometry Helper
     const getGeometryInfo = () => {
@@ -100,14 +129,14 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                 </div>
             )}
 
-            <div className="space-y-3 flex-1">
+            <div className="space-y-3 flex-1 overflow-y-auto">
                 {attributes.map((attr, index) => (
                     <div key={index} className="flex gap-2 items-center">
                         <Input
                             placeholder="Key"
-                            className="h-8 text-xs font-mono"
+                            className="h-8 text-xs font-mono bg-muted/50"
                             value={attr.key}
-                            onChange={(e) => handleChange(index, 'key', e.target.value)}
+                            readOnly
                         />
                         <Input
                             placeholder="Value"
@@ -115,6 +144,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                             value={attr.value}
                             onChange={(e) => handleChange(index, 'value', e.target.value)}
                         />
+                        {/* 
                         <Button
                             variant="ghost"
                             size="icon"
@@ -123,22 +153,110 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                         >
                             <Trash className="h-3 w-3" />
                         </Button>
+                        */}
                     </div>
                 ))}
-                <Button onClick={handleAdd} variant="outline" size="sm" className="w-full">
-                    <Plus className="mr-2 h-3 w-3" /> Add Attribute
-                </Button>
             </div>
-            <div className="pt-4 mt-4 border-t">
-                <Button onClick={handleSave} size="sm" className="w-full">
+
+            <div className="pt-4 mt-4 border-t space-y-2">
+                {/* Template Controls */}
+                <div className="flex gap-2">
+                    <TemplateManager
+                        trigger={<Button variant="outline" size="sm" className="flex-1">Load Template</Button>}
+                        onApplyParams={(props) => {
+                            const newAttrs = [...attributes];
+                            // Merge props: update if exists, append if not
+                            Object.entries(props).forEach(([k, v]) => {
+                                const existing = newAttrs.find(a => a.key === k);
+                                if (existing) {
+                                    existing.value = String(v);
+                                } else {
+                                    newAttrs.push({ key: k, value: String(v) });
+                                }
+                            });
+                            setAttributes(newAttrs);
+                            toast.success('Template applied locally (Save to persist)');
+                        }} />
+
+                    <SaveTemplateDialog
+                        trigger={<Button variant="outline" size="sm" className="flex-1">Save as Template</Button>}
+                        properties={attributes.reduce((acc, curr) => {
+                            if (curr.key) acc[curr.key] = curr.value;
+                            return acc;
+                        }, {} as Record<string, any>)}
+                        onSave={async (name, propsToSave) => {
+                            await createTemplate(name, propsToSave);
+                        }}
+                    />
+                </div>
+
+                <Button onClick={handleSave} size="sm" className="w-full" disabled={!isDirty}>
                     <Save className="mr-2 h-3 w-3" /> Save Changes
                 </Button>
+
+                <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => {
+                        // Ensure saved first if dirty? Or just proceed?
+                        // User said "after created/save", implies we should save first if needed.
+                        if (isDirty) handleSave();
+
+                        // Prep props for next feature (current keys, empty values)
+                        const props: Record<string, any> = {}
+                        for (const attr of attributes) {
+                            if (!attr.key.trim()) continue
+                            props[attr.key] = attr.value
+                        }
+
+                        if (featureGeometry?.type) {
+                            onCreateAnother(featureGeometry.type, props)
+                        } else {
+                            toast.error("Unknown geometry type")
+                        }
+                    }}
+                >
+                    <Plus className="mr-2 h-3 w-3" /> Create Another {featureGeometry?.type}
+                </Button>
+
                 {onDelete && (
-                    <Button onClick={onDelete} variant="destructive" size="sm" className="w-full mt-2">
-                        <Trash className="mr-2 h-3 w-3" /> Delete Feature
-                    </Button>
+                    <>
+                        <Button onClick={() => setShowDeleteConfirm(true)} variant="destructive" size="sm" className="w-full">
+                            <Trash className="mr-2 h-3 w-3" /> Delete Feature
+                        </Button>
+
+                        {/* Custom Delete Modal reusing TemplateManager imports if possible, or simple Dialog */}
+                        <div className="absolute">
+                            {/* Hack: The Dialog requires standard imports. We'll rely on the one imported in Map or just minimal state here if we had the components. 
+                                Actually, we don't import Dialog components here yet. Need to add imports.
+                             */}
+                        </div>
+                    </>
                 )}
             </div>
+
+            {/* Delete Dialog - rendered via Portal if possible, or just standard Dialog if we add imports */}
+            {onDelete && (
+                <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Delete Feature?</DialogTitle>
+                            <DialogDescription>
+                                Are you sure you want to delete this feature? This action cannot be undone.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+                            <Button variant="destructive" onClick={() => {
+                                onDelete();
+                                setShowDeleteConfirm(false);
+                            }}>Delete</Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
         </div>
     )
 }
+

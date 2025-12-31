@@ -3,19 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { User } from '@supabase/supabase-js'
-
-type Feature = {
-    id: string
-    geometry: any
-    properties: any
-    project_id: string
-}
-
-type Project = {
-    id: string
-    name: string
-    user_id: string
-}
+import { Project, Feature } from '@/types'
 
 type ProjectContextType = {
     user: User | null

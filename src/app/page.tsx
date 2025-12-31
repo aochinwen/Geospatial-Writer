@@ -1,7 +1,9 @@
+
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import MapComponent from '@/components/Map'
 import { ProjectProvider } from '@/context/ProjectContext'
+import { TemplateProvider } from '@/context/TemplateContext'
 
 export default async function Home() {
     const supabase = await createClient()
@@ -15,10 +17,13 @@ export default async function Home() {
     }
 
     return (
-        <ProjectProvider initialUser={user}>
-            <main className="flex h-screen w-screen flex-col items-center justify-between overflow-hidden">
-                <MapComponent />
-            </main>
-        </ProjectProvider>
+        <TemplateProvider user={user}>
+            <ProjectProvider initialUser={user}>
+                <main className="flex h-screen w-screen flex-col items-center justify-between overflow-hidden">
+                    <MapComponent />
+                </main>
+            </ProjectProvider>
+        </TemplateProvider>
     )
 }
+
