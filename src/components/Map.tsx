@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import Map, { NavigationControl, useControl, MapRef } from 'react-map-gl/mapbox'
+import MapGL, { NavigationControl, useControl, MapRef, Popup } from 'react-map-gl/mapbox'
 import MapboxDraw from '@mapbox/mapbox-gl-draw'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css'
@@ -9,14 +9,15 @@ import { useProject } from '@/context/ProjectContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Plus, FolderOpen, MapPin, Route, Square, Trash2 } from 'lucide-react'
+import { Plus, FolderOpen, MapPin, Route, Square, Trash2, LogOut, User } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { createClient } from '@/utils/supabase/client'
 import { toast } from 'sonner'
-import { Feature, Geometry } from '@/types'
+import { useRouter } from 'next/navigation'
 
 import AttributeEditor from './AttributeEditor'
 import { TemplateManager } from './TemplateManager'
+import { Feature, Geometry } from '@/types'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 
@@ -108,6 +109,7 @@ export default function MapComponent() {
     const [featuresList, setFeaturesList] = React.useState<DrawFeature[]>([])
     // New: for "Create Another" workflow
     const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, unknown> | null>(null)
+    const [showUserMenu, setShowUserMenu] = React.useState(false)
 
     // Capture features from Context (DB) OR from Draw updates
     // Actually, simple solution: whenever Draw updates (Create, Delete, Update), we set 'featuresList' 
@@ -119,10 +121,14 @@ export default function MapComponent() {
     }, [])
 
     const supabase = createClient()
+    const router = useRouter()
+    const { user } = useProject()
 
 
 
     const isSwapping = React.useRef(false)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [hoverInfo, setHoverInfo] = React.useState<{ longitude: number, latitude: number, feature: any } | null>(null)
 
     // EFFECT: Handle Project Switching - Load Data
     React.useEffect(() => {
@@ -323,12 +329,11 @@ export default function MapComponent() {
                 toast.success('Feature saved')
 
                 refreshFeatures() // Sync context
-            } catch (err) {
-                console.error(err);
-                toast.error('Failed to save feature')
-                // Optional: Revert UI if save fails? 
-                // For now, we leave it as local feature (with UUID) but unsaved.
-            }
+            } catch {
+                toast.error('Failed to save attribute changes')
+            }    // Optional: Revert UI if save fails?
+            // For now, we leave it as local feature (with UUID) but unsaved.
+            syncFeaturesList()
         }
         syncFeaturesList()
     }, [activeProject, refreshFeatures, syncFeaturesList, pendingTemplate, insertFeature])
@@ -381,6 +386,119 @@ export default function MapComponent() {
         syncFeaturesList()
     }, [activeProject, refreshFeatures, syncFeaturesList, deleteFeature])
 
+    const handleSignOut = async () => {
+        await supabase.auth.signOut()
+        router.push('/login')
+        toast.success('Signed out successfully')
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleFeatureClick = (feature: Feature | any) => {
+        if (!drawRef.current) return;
+
+        // Select in Draw
+        // This highlights it.
+        drawRef.current.changeMode('simple_select', { featureIds: [feature.id] });
+
+        // Update Local State
+        setSelectedFeatureId(feature.id);
+        setSelectedFeatureProps(feature.properties || {});
+
+        // Fly to feature
+        const geom = feature.geometry;
+        if (geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+             const [lng, lat] = geom.coordinates as [number, number];
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
+        } else if (geom.type === 'LineString' && Array.isArray(geom.coordinates) && geom.coordinates.length > 0) {
+             const [lng, lat] = geom.coordinates[0] as [number, number];
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
+        } else if (geom.type === 'Polygon' && Array.isArray(geom.coordinates) && geom.coordinates.length > 0 && Array.isArray(geom.coordinates[0]) && geom.coordinates[0].length > 0) {
+            const [lng, lat] = geom.coordinates[0][0] as [number, number];
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
+        }
+    }
+
+    const getFeatureIcon = (type: string) => {
+        switch (type) {
+            case 'Point': return <MapPin className="h-4 w-4" />;
+            case 'LineString': return <Route className="h-4 w-4" />;
+            case 'Polygon': return <Square className="h-4 w-4" />;
+            default: return <MapPin className="h-4 w-4" />;
+        }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const getFeatureName = (f: Feature | any, index: number) => {
+        if (f.properties?.name && typeof f.properties.name === 'string') return f.properties.name;
+        if (f.properties?.title && typeof f.properties.title === 'string') return f.properties.title;
+        // Search for any string property
+        const firstString = Object.values(f.properties || {}).find(v => typeof v === 'string');
+        if (firstString) return firstString as string;
+        return `${f.geometry.type} ${index + 1}`
+    }
+
+    const handleCreateProject = async () => {
+        if (!newProjectName) return
+        await createProject(newProjectName)
+        setNewProjectName('')
+        setIsProjectDialogOpen(false)
+        toast.success('Project created and active')
+    }
+
+    // Safely get geometry for Attribute Editor
+    const getEditorGeometry = () => {
+        const found = featuresList.find(f => f.id === selectedFeatureId);
+        if (found) {
+            return { type: found.geometry.type as Geometry['type'], coordinates: found.geometry.coordinates };
+        }
+        const dbFound = dbFeatures.find(f => f.id === selectedFeatureId);
+        if (dbFound) {
+            return dbFound.geometry;
+        }
+        return undefined;
+    }
+
+    // Create a robust lookup map for features (DB + Local)
+    const featureLookup = React.useMemo(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const map = new Map<string, any>();
+
+        // 1. Add DB features (Authoritative)
+        dbFeatures.forEach(f => {
+            if (f.id) map.set(String(f.id), f);
+        });
+
+        // 2. Add/Override with Local features (Newer/Unsaved)
+        featuresList.forEach(f => {
+            if (f.id) map.set(String(f.id), f);
+        });
+
+        return map;
+    }, [dbFeatures, featuresList]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const onHover = React.useCallback((event: any) => {
+        const { point, lngLat } = event;
+        // Query features under the cursor
+        // We filter for features that are likely ours (e.g. have an ID or geometry)
+        // Note: mapbox-gl-draw layers usually start with 'gl-draw'
+        const features = event.target.queryRenderedFeatures(point);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const drawFeature = features.find((f: any) => f.source && f.source.includes('mapbox-gl-draw'));
+
+        if (drawFeature) {
+            setHoverInfo({
+                longitude: lngLat.lng,
+                latitude: lngLat.lat,
+                feature: drawFeature
+            });
+            event.target.getCanvas().style.cursor = 'pointer';
+        } else {
+            setHoverInfo(null);
+            event.target.getCanvas().style.cursor = '';
+        }
+    }, []);
+
     const onSelectionChange = React.useCallback((e: DrawEvent) => {
         if (isSwapping.current) return;
 
@@ -423,6 +541,7 @@ export default function MapComponent() {
             // Existing Feature: Update
             try {
                 await updateFeature(id, { properties: newProps })
+                refreshFeatures() // REFRESH CONTEXT so Popup sees new props immediately
                 toast.success('Changes saved successfully')
             } catch (err) {
                 console.error(err)
@@ -491,71 +610,6 @@ export default function MapComponent() {
         }
 
         syncFeaturesList()
-    }
-
-
-    const handleCreateProject = async () => {
-        if (!newProjectName) return
-        await createProject(newProjectName)
-        setNewProjectName('')
-        setIsProjectDialogOpen(false)
-        toast.success('Project created and active')
-    }
-
-    const handleFeatureClick = (feature: Feature) => {
-        if (!drawRef.current) return;
-
-        // Select in Draw
-        // This highlights it.
-        drawRef.current.changeMode('simple_select', { featureIds: [feature.id] });
-
-        // Update Local State
-        setSelectedFeatureId(feature.id);
-        setSelectedFeatureProps(feature.properties || {});
-
-        // Fly to feature
-        const geom = feature.geometry;
-        if (geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
-             const [lng, lat] = geom.coordinates as [number, number];
-            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
-        } else if (geom.type === 'LineString' && Array.isArray(geom.coordinates) && geom.coordinates.length > 0) {
-             const [lng, lat] = geom.coordinates[0] as [number, number];
-            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
-        } else if (geom.type === 'Polygon' && Array.isArray(geom.coordinates) && geom.coordinates.length > 0 && Array.isArray(geom.coordinates[0]) && geom.coordinates[0].length > 0) {
-            const [lng, lat] = geom.coordinates[0][0] as [number, number];
-            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
-        }
-    }
-
-    const getFeatureIcon = (type: string) => {
-        switch (type) {
-            case 'Point': return <MapPin className="h-4 w-4" />;
-            case 'LineString': return <Route className="h-4 w-4" />;
-            case 'Polygon': return <Square className="h-4 w-4" />;
-            default: return <MapPin className="h-4 w-4" />;
-        }
-    }
-
-    const getFeatureName = (f: Feature, index: number) => {
-        if (f.properties?.name && typeof f.properties.name === 'string') return f.properties.name;
-        if (f.properties?.title && typeof f.properties.title === 'string') return f.properties.title;
-        // Search for any string property
-        const firstString = Object.values(f.properties || {}).find(v => typeof v === 'string');
-        if (firstString) return firstString as string;
-        return `${f.geometry.type} ${index + 1}`
-    }
-
-    // Safely get geometry for Attribute Editor
-    const getEditorGeometry = () => {
-        const found = featuresList.find(f => f.id === selectedFeatureId);
-        if (found) {
-            return { type: found.geometry.type as Geometry['type'], coordinates: found.geometry.coordinates };
-        }
-        const dbFound = dbFeatures.find(f => f.id === selectedFeatureId);
-        if (dbFound) {
-            return dbFound.geometry;
-        }
-        return undefined;
     }
 
     return (
@@ -651,6 +705,32 @@ export default function MapComponent() {
                     </CardContent>
                 </Card>
 
+            </div>
+
+            {/* User Account FAB */}
+            <div className="absolute bottom-4 left-4 z-10 flex flex-col-reverse items-start gap-2">
+                <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 rounded-full shadow-lg bg-background"
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    title="Account"
+                >
+                    <User className="h-5 w-5" />
+                </Button>
+
+                {showUserMenu && (
+                    <Card className="mb-2 w-64 animate-in slide-in-from-bottom-2 fade-in duration-200">
+                        <CardContent className="p-3 space-y-3">
+                            <div className="text-xs text-muted-foreground font-medium truncate px-1" title={user?.email}>
+                                {user?.email}
+                            </div>
+                            <Button variant="destructive" size="sm" className="w-full text-xs h-8" onClick={handleSignOut}>
+                                <LogOut className="mr-2 h-3 w-3" /> Sign Out
+                            </Button>
+                        </CardContent>
+                    </Card>
+                )}
             </div>
 
             <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
@@ -766,10 +846,12 @@ export default function MapComponent() {
             </Dialog>
 
             <div className="flex-1 relative">
-                <Map
+                <MapGL
                     ref={mapRef}
                     {...viewState}
                     onMove={evt => setViewState(evt.viewState)}
+                    onMouseMove={onHover}
+                    onMouseLeave={() => setHoverInfo(null)}
                     style={{ width: '100%', height: '100%' }}
                     mapStyle="mapbox://styles/mapbox/streets-v11"
                     mapboxAccessToken={TOKEN}
@@ -790,7 +872,56 @@ export default function MapComponent() {
                         onDelete={stableOnDelete}
                         onSelectionChange={stableOnSelectionChange}
                     />
-                </Map>
+                    {/* Hover Popup */}
+                    {hoverInfo && (() => {
+                        // 1. Look up feature in our session Map
+                        //    Mapbox Draw features might have ID in properties if not at top level
+                        const rawId = hoverInfo.feature.id || hoverInfo.feature.properties?.id;
+                        const id = String(rawId);
+                        const sessionFeature = featureLookup.get(id);
+
+                        // 2. Determine reliable props
+                        // If found in session (DB or Local List), use that.
+                        // Else fallback to Mapbox Draw event props (rarely needed if sync is good)
+                        const reliableProps = sessionFeature ? sessionFeature.properties : (hoverInfo.feature.properties || {});
+
+
+
+                        // 3. Filter out internal Mapbox Draw properties
+                        const displayProps = Object.entries(reliableProps as Record<string, unknown>).filter(([k]) => {
+                            const lower = k.toLowerCase();
+                            // Filter system keys
+                            if (['id', 'meta', 'meta:type', 'active', 'mode', 'parent', 'coord_path'].includes(lower)) return false;
+                            // Filter empty strings if desired (optional, maybe user wants to see them?)
+                            return true;
+                        });
+
+                        return (
+                            <Popup
+                                longitude={hoverInfo.longitude}
+                                latitude={hoverInfo.latitude}
+                                closeButton={false}
+                                closeOnClick={false}
+                                className="z-50"
+                                offset={10}
+                            >
+                                <div className="text-xs max-w-[200px] break-words">
+                                    <div className="font-semibold mb-1 border-b pb-1">Properties</div>
+                                    {displayProps.length === 0 ? (
+                                        <div className="text-muted-foreground italic">No properties</div>
+                                    ) : (
+                                        displayProps.map(([k, v]) => (
+                                            <div key={k} className="flex gap-2">
+                                                <span className="font-medium text-muted-foreground">{k}:</span>
+                                                <span>{String(v)}</span>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </Popup>
+                        );
+                    })()}
+                </MapGL>
             </div>
 
             {/* Attribute Editor - Floating Panel */}
@@ -828,12 +959,19 @@ export default function MapComponent() {
                                     setSelectedFeatureId(null)
                                 }
                             }}
-                            onClose={() => setSelectedFeatureId(null)}
+                            onClose={() => {
+                                setSelectedFeatureId(null)
+                                if (drawRef.current) {
+                                    drawRef.current.changeMode('simple_select', { featureIds: [] })
+                                }
+                            }}
                             onCreateAnother={handleCreateAnother}
                         />
                     </div>
                 )
             }
+
+
         </div >
     )
 }

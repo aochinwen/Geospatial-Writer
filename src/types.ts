@@ -1,7 +1,7 @@
 
 export interface Geometry {
     type: 'Point' | 'LineString' | 'Polygon' | 'MultiPoint' | 'MultiLineString' | 'MultiPolygon'
-    coordinates: unknown[]
+    coordinates: number[] | number[][] | number[][][]
 }
 
 export interface Feature {

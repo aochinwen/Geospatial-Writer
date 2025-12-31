@@ -20,7 +20,7 @@ const TemplateContext = createContext<TemplateContextType | undefined>(undefined
 export function TemplateProvider({ children, user }: { children: React.ReactNode, user: User | null }) {
     const [templates, setTemplates] = useState<FeatureTemplate[]>([])
     const [loading, setLoading] = useState(true)
-    const supabase = createClient()
+    const supabase = React.useMemo(() => createClient(), [])
 
     const fetchTemplates = useCallback(async () => {
         if (!user) {

@@ -29,7 +29,7 @@ export function SaveTemplateDialog({ open, onOpenChange, onSave, defaultName = '
                 <DialogHeader>
                     <DialogTitle>Save as Template</DialogTitle>
                     <DialogDescription>
-                        Save these properties as a template to reuse later.
+                        Create a reusable template from this feature&apos;s attributes.
                     </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">

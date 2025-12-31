@@ -26,7 +26,7 @@ export type KeyValue = {
 interface AttributeEditorProps {
     featureId: string
     initialProperties: Record<string, unknown>
-    featureGeometry?: { type: Geometry['type'], coordinates: unknown[] }
+    featureGeometry?: Geometry // GeoJSON Geometry
     onSave: (id: string, properties: Record<string, unknown>) => void
     onDelete?: () => void
     onCreateAnother: (geometryType: string, currentProps: Record<string, unknown>) => void
@@ -78,7 +78,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     }
 
     const handleSave = () => {
-        const props: Record<string, string> = {}
+        const props: Record<string, unknown> = {}
         for (const attr of attributes) {
             if (!attr.key.trim()) continue
             props[attr.key] = attr.value
@@ -113,13 +113,13 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         if (!featureGeometry) return null;
         const type = featureGeometry.type;
         let details = '';
-        if (type === 'Point' && Array.isArray(featureGeometry.coordinates) && featureGeometry.coordinates.length >= 2) {
-            const [lng, lat] = featureGeometry.coordinates as [number, number];
+        if (type === 'Point') {
+            const [lng, lat] = featureGeometry.coordinates as number[];
             details = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
-        } else if (type === 'LineString' && Array.isArray(featureGeometry.coordinates)) {
-            details = `${featureGeometry.coordinates.length} points`; // Maybe show first/last?
-        } else if (type === 'Polygon' && Array.isArray(featureGeometry.coordinates) && Array.isArray(featureGeometry.coordinates[0])) {
-            details = `${featureGeometry.coordinates[0].length} points (closed)`;
+        } else if (type === 'LineString') {
+            details = `${(featureGeometry.coordinates as number[][]).length} points`; // Maybe show first/last?
+        } else if (type === 'Polygon') {
+            details = `${(featureGeometry.coordinates as number[][][])[0].length} points (closed)`;
         }
         return { type, details };
     }
@@ -230,7 +230,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                         if (isDirty) handleSave();
 
                         // Prep props for next feature (current keys, empty values)
-                        const props: Record<string, string> = {}
+                        const props: Record<string, unknown> = {}
                         for (const attr of attributes) {
                             if (!attr.key.trim()) continue
                             props[attr.key] = attr.value
