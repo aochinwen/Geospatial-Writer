@@ -35,6 +35,7 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 - **Geospatial Drawing**: Create Points, LineStrings, and Polygons.
 - **Supabase Integration**: Persist valid UUID-based geospatial features to Supabase.
 - **Deferred Saving**: Features start as local drafts and are only saved to the database upon user confirmation.
+- **Resource Management**: Delete projects and features directly from the UI with custom confirmation dialogs.
 - **Attribute Editing**: Floating panel to manage feature properties with real-time validation.
 
 ## Deploy on Vercel

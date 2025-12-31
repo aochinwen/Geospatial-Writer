@@ -26,6 +26,7 @@ type ProjectContextType = {
     setActiveProject: (project: Project | null) => void
     refreshFeatures: () => Promise<void>
     createProject: (name: string) => Promise<Project | null>
+    deleteProject: (id: string) => Promise<void>
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined)
@@ -89,8 +90,19 @@ export function ProjectProvider({ children, initialUser }: { children: React.Rea
         return null
     }
 
+    const deleteProject = async (id: string) => {
+        const { error } = await supabase.from('projects').delete().eq('id', id)
+        if (!error) {
+            setProjects(prev => prev.filter(p => p.id !== id))
+            if (activeProject?.id === id) {
+                setActiveProject(null)
+                setFeatures([])
+            }
+        }
+    }
+
     return (
-        <ProjectContext.Provider value={{ user, projects, activeProject, features, loading, setActiveProject, refreshFeatures, createProject }}>
+        <ProjectContext.Provider value={{ user, projects, activeProject, features, loading, setActiveProject, refreshFeatures, createProject, deleteProject }}>
             {children}
         </ProjectContext.Provider>
     )

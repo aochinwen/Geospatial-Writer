@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, FolderOpen, MapPin, Route, Square, Trash2 } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { createClient } from '@/utils/supabase/client'
 import { toast } from 'sonner'
 
@@ -53,7 +53,7 @@ const ForwardedDrawControl = React.forwardRef((props: any, ref) => (
 export default function MapComponent() {
     const mapRef = React.useRef<MapRef>(null)
     const drawRef = React.useRef<MapboxDraw | null>(null)
-    const { activeProject, projects, createProject, setActiveProject, refreshFeatures, features: dbFeatures } = useProject()
+    const { activeProject, projects, createProject, deleteProject, setActiveProject, refreshFeatures, features: dbFeatures } = useProject()
     const [viewState, setViewState] = React.useState({
         longitude: 103.8198,
         latitude: 1.3521,
@@ -61,6 +61,7 @@ export default function MapComponent() {
     })
     const [newProjectName, setNewProjectName] = React.useState('')
     const [isProjectDialogOpen, setIsProjectDialogOpen] = React.useState(false)
+    const [projectToDelete, setProjectToDelete] = React.useState<{ id: string, name: string } | null>(null)
     const [isPreviewOpen, setIsPreviewOpen] = React.useState(false)
     const [selectedFeatureId, setSelectedFeatureId] = React.useState<string | null>(null)
     const [selectedFeatureProps, setSelectedFeatureProps] = React.useState<Record<string, any>>({})
@@ -559,18 +560,57 @@ export default function MapComponent() {
                             <div className="max-h-60 overflow-y-auto space-y-2">
                                 {projects.length === 0 && <p className="text-sm text-neutral-500">No projects found.</p>}
                                 {projects.map(p => (
-                                    <Button
-                                        key={p.id}
-                                        variant={activeProject?.id === p.id ? "secondary" : "ghost"}
-                                        className="w-full justify-start text-left"
-                                        onClick={() => { setActiveProject(p); setIsProjectDialogOpen(false); }}
-                                    >
-                                        {p.name}
-                                    </Button>
+                                    <div key={p.id} className="flex items-center gap-2 group">
+                                        <Button
+                                            variant={activeProject?.id === p.id ? "secondary" : "ghost"}
+                                            className="flex-1 justify-start text-left min-w-0 truncate"
+                                            onClick={() => { setActiveProject(p); setIsProjectDialogOpen(false); }}
+                                        >
+                                            <span className="truncate">{p.name}</span>
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                setProjectToDelete(p)
+                                            }}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
                                 ))}
                             </div>
                         </div>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!projectToDelete} onOpenChange={(open) => !open && setProjectToDelete(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Delete Project?</DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to delete <span className="font-semibold text-foreground">{projectToDelete?.name}</span>?
+                            This action cannot be undone and all associated features will be lost.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setProjectToDelete(null)}>Cancel</Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => {
+                                if (projectToDelete) {
+                                    deleteProject(projectToDelete.id)
+                                    toast.success('Project deleted')
+                                    setProjectToDelete(null)
+                                }
+                            }}
+                        >
+                            Delete Project
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
@@ -610,6 +650,18 @@ export default function MapComponent() {
                         initialProperties={selectedFeatureProps}
                         featureGeometry={drawRef.current?.get(selectedFeatureId)?.geometry} // Pass geometry
                         onSave={handleAttributeSave}
+                        onDelete={() => {
+                            if (confirm('Delete this feature?')) {
+                                // Call onDelete with structure expected by Mapbox Draw / our handler
+                                onDelete({ features: [{ id: selectedFeatureId }] })
+                                // Also remove from draw instance locally
+                                if (drawRef.current) {
+                                    drawRef.current.delete(selectedFeatureId)
+                                    // Clear selection
+                                    setSelectedFeatureId(null)
+                                }
+                            }
+                        }}
                         onClose={() => setSelectedFeatureId(null)}
                     />
                 </div>

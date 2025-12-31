@@ -17,10 +17,11 @@ interface AttributeEditorProps {
     initialProperties: Record<string, any>
     featureGeometry?: any // GeoJSON Geometry
     onSave: (id: string, properties: Record<string, any>) => void
+    onDelete?: () => void
     onClose: () => void
 }
 
-export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onClose }: AttributeEditorProps) {
+export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onDelete, onClose }: AttributeEditorProps) {
     const [attributes, setAttributes] = useState<KeyValue[]>([])
 
     useEffect(() => {
@@ -132,6 +133,11 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                 <Button onClick={handleSave} size="sm" className="w-full">
                     <Save className="mr-2 h-3 w-3" /> Save Changes
                 </Button>
+                {onDelete && (
+                    <Button onClick={onDelete} variant="destructive" size="sm" className="w-full mt-2">
+                        <Trash className="mr-2 h-3 w-3" /> Delete Feature
+                    </Button>
+                )}
             </div>
         </div>
     )
