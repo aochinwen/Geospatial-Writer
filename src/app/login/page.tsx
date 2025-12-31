@@ -24,7 +24,7 @@ export default function LoginPage() {
                                 <Input id="password" name="password" type="password" required />
                             </div>
                         </div>
-                        <div className="flex justify-between mt-6 gap-2">
+                        <div className="flex flex-col gap-2 mt-6">
                             <Button formAction={login} className="w-full">Log in</Button>
                             <Button formAction={signup} variant="outline" className="w-full">Sign up</Button>
                         </div>

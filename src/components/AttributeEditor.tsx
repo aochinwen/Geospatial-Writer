@@ -18,6 +18,8 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 
+import { Geometry } from '@/types'
+
 export type KeyValue = {
     key: string
     value: string
@@ -25,11 +27,11 @@ export type KeyValue = {
 
 interface AttributeEditorProps {
     featureId: string
-    initialProperties: Record<string, any>
-    featureGeometry?: any // GeoJSON Geometry
-    onSave: (id: string, properties: Record<string, any>) => void
+    initialProperties: Record<string, unknown>
+    featureGeometry?: Geometry // GeoJSON Geometry
+    onSave: (id: string, properties: Record<string, unknown>) => void
     onDelete?: () => void
-    onCreateAnother: (geometryType: string, currentProps: Record<string, any>) => void
+    onCreateAnother: (geometryType: string, currentProps: Record<string, unknown>) => void
     onClose: () => void
 }
 
@@ -41,7 +43,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     const [selectedTemplate, setSelectedTemplate] = useState<string>('')
 
     // Helper to check dirtiness
-    const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, any>) => {
+    const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, unknown>) => {
         const currentObj: Record<string, string> = {};
         currentAttrs.forEach(a => { if (a.key.trim()) currentObj[a.key] = a.value });
 
@@ -86,7 +88,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     }
 
     const handleSave = () => {
-        const props: Record<string, any> = {}
+        const props: Record<string, unknown> = {}
         for (const attr of attributes) {
             if (!attr.key.trim()) continue
             props[attr.key] = attr.value
@@ -122,12 +124,12 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         const type = featureGeometry.type;
         let details = '';
         if (type === 'Point') {
-            const [lng, lat] = featureGeometry.coordinates;
+            const [lng, lat] = featureGeometry.coordinates as number[];
             details = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
         } else if (type === 'LineString') {
-            details = `${featureGeometry.coordinates.length} points`; // Maybe show first/last?
+            details = `${(featureGeometry.coordinates as number[][]).length} points`; // Maybe show first/last?
         } else if (type === 'Polygon') {
-            details = `${featureGeometry.coordinates[0].length} points (closed)`;
+            details = `${(featureGeometry.coordinates as number[][][])[0].length} points (closed)`;
         }
         return { type, details };
     }
@@ -246,7 +248,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                         if (isDirty) handleSave();
 
                         // Prep props for next feature (current keys, empty values)
-                        const props: Record<string, any> = {}
+                        const props: Record<string, unknown> = {}
                         for (const attr of attributes) {
                             if (!attr.key.trim()) continue
                             props[attr.key] = attr.value

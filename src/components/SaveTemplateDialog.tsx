@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Plus } from 'lucide-react'
 
 interface SaveTemplateDialogProps {
-    properties: Record<string, any>
-    onSave: (name: string, props: Record<string, any>) => Promise<void>
+    properties: Record<string, unknown>
+    onSave: (name: string, props: Record<string, unknown>) => Promise<void>
     trigger?: React.ReactNode
 }
 
@@ -46,7 +46,7 @@ export function SaveTemplateDialog({ properties, onSave, trigger }: SaveTemplate
                 <DialogHeader>
                     <DialogTitle>Save New Template</DialogTitle>
                     <DialogDescription>
-                        Create a reusable template from this feature's attributes.
+                        Create a reusable template from this feature&apos;s attributes.
                     </DialogDescription>
                 </DialogHeader>
                 <div className="py-4 space-y-4">

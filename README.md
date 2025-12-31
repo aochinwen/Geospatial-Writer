@@ -39,6 +39,7 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 - **Attribute Editing**: Floating panel to manage feature properties with real-time validation.
 - **Feature Templates**: Manage reuseable property templates via the "Manage Global Templates" interface. Apply templates using a convenient dropdown in the Attribute Editor, with clear indication of the currently active template. Supports "My Templates" and "Shared Templates".
 - **Workflow Optimization**: "Create Another" button to quickly add multiple similar features.
+- **Hover Popups**: View feature properties instantly by hovering over map elements.
 
 ## Deploy on Vercel
 

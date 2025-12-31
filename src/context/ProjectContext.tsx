@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { User } from '@supabase/supabase-js'
 import { Project, Feature } from '@/types'
@@ -20,51 +20,53 @@ type ProjectContextType = {
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined)
 
 export function ProjectProvider({ children, initialUser }: { children: React.ReactNode, initialUser: User | null }) {
-    const [user, setUser] = useState<User | null>(initialUser)
+    const [user] = useState<User | null>(initialUser)
     const [projects, setProjects] = useState<Project[]>([])
     const [activeProject, setActiveProject] = useState<Project | null>(null)
     const [features, setFeatures] = useState<Feature[]>([])
     const [loading, setLoading] = useState(true)
 
-    const supabase = createClient()
+    const supabase = React.useMemo(() => createClient(), [])
+
+    const fetchProjects = useCallback(async () => {
+        setLoading(true)
+        const { data } = await supabase.from('projects').select('*').order('created_at', { ascending: false })
+        if (data) setProjects(data)
+        setLoading(false)
+    }, [supabase])
+
+    const fetchFeatures = useCallback(async (projectId: string) => {
+        setLoading(true)
+        const { data } = await supabase.from('features').select('*').eq('project_id', projectId)
+        if (data) setFeatures(data)
+        setLoading(false)
+    }, [supabase])
+
+    const refreshFeatures = useCallback(async () => {
+        if (activeProject) {
+            await fetchFeatures(activeProject.id)
+        }
+    }, [activeProject, fetchFeatures])
 
     useEffect(() => {
         if (user) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             fetchProjects()
         }
-    }, [user])
+    }, [user, fetchProjects])
 
     useEffect(() => {
         if (activeProject) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             fetchFeatures(activeProject.id)
         } else {
             setFeatures([])
         }
-    }, [activeProject])
-
-    const fetchProjects = async () => {
-        setLoading(true)
-        const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false })
-        if (data) setProjects(data)
-        setLoading(false)
-    }
-
-    const fetchFeatures = async (projectId: string) => {
-        setLoading(true)
-        const { data, error } = await supabase.from('features').select('*').eq('project_id', projectId)
-        if (data) setFeatures(data)
-        setLoading(false)
-    }
-
-    const refreshFeatures = async () => {
-        if (activeProject) {
-            await fetchFeatures(activeProject.id)
-        }
-    }
+    }, [activeProject, fetchFeatures])
 
     const createProject = async (name: string) => {
         if (!user) return null
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from('projects')
             .insert({ name, user_id: user.id })
             .select()

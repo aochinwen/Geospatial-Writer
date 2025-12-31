@@ -1,14 +1,14 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTemplates } from '@/hooks/useTemplates'
 import { Trash2, Check, Plus, ArrowLeft, X } from 'lucide-react'
 
 interface TemplateManagerProps {
-    onApplyParams?: (properties: Record<string, any>) => void
+    onApplyParams?: (properties: Record<string, unknown>) => void
     trigger?: React.ReactNode
 }
 
@@ -28,7 +28,7 @@ export function TemplateManager({ onApplyParams, trigger }: TemplateManagerProps
         const props = newAttributes.reduce((acc, curr) => {
             if (curr.key.trim()) acc[curr.key.trim()] = curr.value
             return acc
-        }, {} as Record<string, any>)
+        }, {} as Record<string, unknown>)
 
         await createTemplate(newName, props)
         // Reset and go back to list
