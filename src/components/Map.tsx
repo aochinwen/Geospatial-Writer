@@ -206,9 +206,10 @@ export default function MapComponent() {
                 .update(payload)
                 .eq('id', id)
                 .select()
-                .single()
+                .maybeSingle()
 
             if (error) throw error
+            if (!data) return null
             return data
         } catch (error) {
             console.error('Update error:', error)
