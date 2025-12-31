@@ -9,7 +9,7 @@ import { User } from '@supabase/supabase-js'
 type TemplateContextType = {
     templates: FeatureTemplate[]
     loading: boolean
-    createTemplate: (name: string, properties: Record<string, any>) => Promise<FeatureTemplate | undefined>
+    createTemplate: (name: string, properties: Record<string, unknown>) => Promise<FeatureTemplate | undefined>
     deleteTemplate: (id: string) => Promise<void>
     refreshTemplates: () => Promise<void>
     user: User | null
@@ -50,7 +50,7 @@ export function TemplateProvider({ children, user }: { children: React.ReactNode
         fetchTemplates()
     }, [fetchTemplates])
 
-    const createTemplate = async (name: string, properties: Record<string, any>) => {
+    const createTemplate = async (name: string, properties: Record<string, unknown>) => {
         if (!user) {
             toast.error('You must be logged in to create templates')
             return

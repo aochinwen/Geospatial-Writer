@@ -1,237 +1,165 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Plus, Trash2, Search } from 'lucide-react'
 import { useTemplates } from '@/hooks/useTemplates'
-import { Trash2, Check, Plus, ArrowLeft, X } from 'lucide-react'
 
-interface TemplateManagerProps {
-    onApplyParams?: (properties: Record<string, any>) => void
-    trigger?: React.ReactNode
-}
-
-export function TemplateManager({ onApplyParams, trigger }: TemplateManagerProps) {
-    const { templates, loading, deleteTemplate, createTemplate, user } = useTemplates()
-    const [open, setOpen] = useState(false)
-    const [view, setView] = useState<'list' | 'create'>('list')
-    const [templateToDelete, setTemplateToDelete] = useState<string | null>(null)
-
-    // Create Form State
+export function TemplateManager({ trigger }: { trigger: React.ReactNode }) {
+    const { templates, deleteTemplate, createTemplate, user } = useTemplates()
+    const [search, setSearch] = useState('')
+    const [isCreating, setIsCreating] = useState(false)
     const [newName, setNewName] = useState('')
-    const [newAttributes, setNewAttributes] = useState<{ key: string, value: string }[]>([{ key: '', value: '' }])
 
-    const handleCreate = async () => {
-        if (!newName) return
+    const filteredTemplates = templates.filter(t =>
+        t.name.toLowerCase().includes(search.toLowerCase())
+    )
 
-        const props = newAttributes.reduce((acc, curr) => {
-            if (curr.key.trim()) acc[curr.key.trim()] = curr.value
-            return acc
-        }, {} as Record<string, any>)
+    // Better State for Editor
+    const [editorRows, setEditorRows] = useState<{ key: string, value: string }[]>([{ key: '', value: '' }])
 
-        await createTemplate(newName, props)
-        // Reset and go back to list
-        setView('list')
-        setNewName('')
-        setNewAttributes([{ key: '', value: '' }])
+    const handleEditorChange = (index: number, field: 'key' | 'value', val: string) => {
+        const rows = [...editorRows]
+        rows[index][field] = val
+        setEditorRows(rows)
     }
 
-    // Reset view when dialog closes
-    const onOpenChange = (isOpen: boolean) => {
-        setOpen(isOpen)
-        if (!isOpen) {
-            setTemplateToDelete(null)
-            setTimeout(() => setView('list'), 300) // Small delay to avoid flicker during cloud
+    const saveFromRows = async () => {
+        if (!newName.trim()) return
+
+        const props: Record<string, string> = {}
+        editorRows.forEach(r => {
+            if (r.key.trim()) props[r.key] = r.value
+        })
+
+        try {
+            await createTemplate(newName, props)
+            setIsCreating(false)
+            setNewName('')
+            setEditorRows([{ key: '', value: '' }])
+        } catch (err) {
+            console.error(err)
         }
     }
 
+
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog>
             <DialogTrigger asChild>
-                {trigger || <Button variant="outline" size="sm">Manage Templates</Button>}
+                {trigger}
             </DialogTrigger>
-            <DialogContent className="max-w-md max-h-[80vh] flex flex-col">
+            <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
                 <DialogHeader>
-                    <DialogTitle>{view === 'list' ? 'Feature Templates' : 'New Template'}</DialogTitle>
-                    <DialogDescription>
-                        {view === 'list'
-                            ? 'Manage your global feature templates here.'
-                            : 'Define a new template schema from scratch.'}
-                    </DialogDescription>
+                    <DialogTitle>Template Library</DialogTitle>
                 </DialogHeader>
 
-                <div className="flex-1 overflow-hidden flex flex-col">
-                    {view === 'list' ? (
-                        <>
-                            <div className="mb-4">
-                                <Button className="w-full" size="sm" onClick={() => setView('create')}>
-                                    <Plus className="mr-2 h-4 w-4" /> Create New Template
-                                </Button>
-                            </div>
-
-                            {loading ? (
-                                <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
-                            ) : templates.length === 0 ? (
-                                <div className="p-8 text-center text-sm text-muted-foreground border-2 border-dashed rounded-lg m-2">
-                                    No templates found.
-                                </div>
-                            ) : (
-                                <div className="flex-1 overflow-y-auto pr-4">
-                                    {/* My Templates */}
-                                    {templates.some(t => t.user_id === user?.id) && (
-                                        <div className="mb-4">
-                                            <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-1 uppercase tracking-wider">My Templates</h3>
-                                            <div className="space-y-2 p-1">
-                                                {templates.filter(t => t.user_id === user?.id).map(template => (
-                                                    <div key={template.id} className="flex flex-col border rounded-lg p-3 hover:bg-accent/50 transition-colors">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <span className="font-medium text-sm">{template.name}</span>
-                                                            <div className="flex gap-2">
-                                                                {templateToDelete === template.id ? (
-                                                                    <div className="flex items-center gap-1 bg-destructive/10 rounded px-1">
-                                                                        <span className="text-[10px] text-destructive font-semibold px-1">Confirm?</span>
-                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:bg-destructive/20" onClick={(e) => {
-                                                                            e.stopPropagation()
-                                                                            deleteTemplate(template.id)
-                                                                            setTemplateToDelete(null)
-                                                                        }}>
-                                                                            <Check className="h-3 w-3" />
-                                                                        </Button>
-                                                                        <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={(e) => {
-                                                                            e.stopPropagation()
-                                                                            setTemplateToDelete(null)
-                                                                        }}>
-                                                                            <X className="h-3 w-3" />
-                                                                        </Button>
-                                                                    </div>
-                                                                ) : (
-                                                                    <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => {
-                                                                        e.stopPropagation()
-                                                                        setTemplateToDelete(template.id)
-                                                                    }}>
-                                                                        <Trash2 className="h-3 w-3" />
-                                                                    </Button>
-                                                                )}
-                                                                {onApplyParams && (
-                                                                    <Button size="sm" onClick={() => {
-                                                                        onApplyParams(template.properties)
-                                                                        setOpen(false)
-                                                                    }}>
-                                                                        <Check className="mr-2 h-3 w-3" /> Apply
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded max-h-20 overflow-hidden text-ellipsis">
-                                                            {Object.entries(template.properties).map(([k, v]) => (
-                                                                <div key={k} className="truncate">{k}: {String(v)}</div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Other Templates */}
-                                    {templates.some(t => t.user_id !== user?.id) && (
-                                        <div>
-                                            <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-1 uppercase tracking-wider">Shared Templates</h3>
-                                            <div className="space-y-2 p-1">
-                                                {templates.filter(t => t.user_id !== user?.id).map(template => (
-                                                    <div key={template.id} className="flex flex-col border rounded-lg p-3 hover:bg-accent/50 transition-colors opacity-90">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <div className="flex flex-col">
-                                                                <span className="font-medium text-sm">{template.name}</span>
-                                                                <span className="text-[10px] text-muted-foreground">by others</span>
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                {/* No delete button for shared templates */}
-                                                                {onApplyParams && (
-                                                                    <Button size="sm" variant="secondary" onClick={() => {
-                                                                        onApplyParams(template.properties)
-                                                                        setOpen(false)
-                                                                    }}>
-                                                                        <Check className="mr-2 h-3 w-3" /> Apply
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded max-h-20 overflow-hidden text-ellipsis">
-                                                            {Object.entries(template.properties).map(([k, v]) => (
-                                                                <div key={k} className="truncate">{k}: {String(v)}</div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </>
-                    ) : (
-                        <div className="flex-col flex h-full">
+                <div className="flex gap-4 h-full min-h-[400px]">
+                    {/* Left: List */}
+                    <div className="w-1/3 flex flex-col gap-2 border-r pr-4">
+                        <div className="relative">
+                            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input
-                                placeholder="Template Name"
-                                value={newName}
-                                onChange={e => setNewName(e.target.value)}
-                                className="mb-4"
-                                autoFocus
+                                placeholder="Search templates..."
+                                className="pl-8"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
                             />
-                            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-                                {newAttributes.map((attr, idx) => (
-                                    <div key={idx} className="flex gap-2 items-center">
-                                        <Input
-                                            placeholder="Key"
-                                            className="font-mono text-xs"
-                                            value={attr.key}
-                                            onChange={e => {
-                                                const copy = [...newAttributes]
-                                                copy[idx].key = e.target.value
-                                                setNewAttributes(copy)
-                                            }}
-                                        />
-                                        <Input
-                                            placeholder="Default Value"
-                                            className="text-xs"
-                                            value={attr.value}
-                                            onChange={e => {
-                                                const copy = [...newAttributes]
-                                                copy[idx].value = e.target.value
-                                                setNewAttributes(copy)
-                                            }}
-                                        />
-                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => {
-                                            if (newAttributes.length > 1) {
-                                                setNewAttributes(newAttributes.filter((_, i) => i !== idx))
-                                            } else {
-                                                setNewAttributes([{ key: '', value: '' }])
-                                            }
-                                        }}>
-                                            <Trash2 className="h-3 w-3" />
-                                        </Button>
+                        </div>
+                        <Button className="w-full justify-start" variant="outline" onClick={() => setIsCreating(true)}>
+                            <Plus className="mr-2 h-4 w-4" /> New Template
+                        </Button>
+                        <div className="flex-1 overflow-y-auto">
+                            <div className="space-y-2 pr-2">
+                                {filteredTemplates.map(t => (
+                                    <div key={t.id} className="p-2 border rounded hover:bg-muted group relative">
+                                        <div className="font-medium text-sm">{t.name}</div>
+                                        <div className="text-xs text-muted-foreground">{Object.keys(t.properties).length} properties</div>
+                                        {user?.id === t.user_id && (
+                                            <Button
+                                                variant="destructive"
+                                                size="icon"
+                                                className="h-6 w-6 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    if (confirm('Delete template?')) deleteTemplate(t.id)
+                                                }}
+                                            >
+                                                <Trash2 className="h-3 w-3" />
+                                            </Button>
+                                        )}
+                                        {user?.id !== t.user_id && (
+                                            <span className="absolute top-2 right-2 text-[10px] inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80">
+                                                Shared
+                                            </span>
+                                        )}
                                     </div>
                                 ))}
-                                <Button variant="outline" size="sm" className="w-full mt-2" onClick={() => setNewAttributes([...newAttributes, { key: '', value: '' }])}>
-                                    <Plus className="mr-2 h-3 w-3" /> Add Attribute
-                                </Button>
-                            </div>
-                            <div className="mt-4 flex gap-2">
-                                <Button variant="outline" className="flex-1" onClick={() => setView('list')}>
-                                    <ArrowLeft className="mr-2 h-3 w-3" /> Back
-                                </Button>
-                                <Button className="flex-1" onClick={handleCreate} disabled={!newName}>
-                                    Save Template
-                                </Button>
                             </div>
                         </div>
-                    )}
+                    </div>
+
+                    {/* Right: Preview / Create */}
+                    <div className="flex-1 pl-2">
+                        {isCreating ? (
+                            <div className="space-y-4">
+                                <h4 className="font-semibold">Create New Template</h4>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium">Template Name</label>
+                                    <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Park Bench" />
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <label className="text-xs font-medium">Default Properties</label>
+                                        <Button size="sm" variant="ghost" onClick={() => setEditorRows([...editorRows, { key: '', value: '' }])}>
+                                            <Plus className="h-3 w-3 mr-1" /> Add Field
+                                        </Button>
+                                    </div>
+                                    <div className="border rounded p-2 max-h-[300px] overflow-y-auto space-y-2">
+                                        {editorRows.map((row, i) => (
+                                            <div key={i} className="flex gap-2">
+                                                <Input
+                                                    placeholder="Key"
+                                                    className="h-8 text-xs font-mono"
+                                                    value={row.key}
+                                                    onChange={e => handleEditorChange(i, 'key', e.target.value)}
+                                                />
+                                                <Input
+                                                    placeholder="Default Value"
+                                                    className="h-8 text-xs"
+                                                    value={row.value}
+                                                    onChange={e => handleEditorChange(i, 'value', e.target.value)}
+                                                />
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                                    onClick={() => {
+                                                        const newRows = [...editorRows]
+                                                        newRows.splice(i, 1)
+                                                        setEditorRows(newRows)
+                                                    }}
+                                                >
+                                                    <Trash2 className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="flex justify-end gap-2 pt-4">
+                                    <Button variant="ghost" onClick={() => setIsCreating(false)}>Cancel</Button>
+                                    <Button onClick={saveFromRows} disabled={!newName.trim()}>Save Template</Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                                Select a template to view details or create a new one.
+                            </div>
+                        )}
+                    </div>
                 </div>
             </DialogContent>
         </Dialog>
     )
 }
-
-

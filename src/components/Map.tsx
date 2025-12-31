@@ -10,31 +10,69 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, FolderOpen, MapPin, Route, Square, Trash2 } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { createClient } from '@/utils/supabase/client'
 import { toast } from 'sonner'
+import { Feature, Geometry } from '@/types'
 
 import AttributeEditor from './AttributeEditor'
 import { TemplateManager } from './TemplateManager'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 
-function DrawControl(props: any) {
+// Define minimal Draw types
+interface DrawFeature {
+    id: string
+    type: string
+    geometry: Geometry
+    properties: Record<string, unknown>
+}
+
+interface DrawEvent {
+    features: DrawFeature[]
+}
+
+// Minimal type for Mapbox Draw Control options
+interface DrawControlProps {
+    onCreate?: (e: DrawEvent) => void
+    onUpdate?: (e: DrawEvent) => void
+    onDelete?: (e: DrawEvent) => void
+    onSelectionChange?: (e: DrawEvent) => void
+    position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+    displayControlsDefault?: boolean
+    controls?: {
+        point?: boolean
+        line_string?: boolean
+        polygon?: boolean
+        trash?: boolean
+        combine_features?: boolean
+        uncombine_features?: boolean
+    }
+}
+
+// Add ref to props
+interface ForwardedDrawControlProps extends DrawControlProps {
+    forwardedRef: React.Ref<MapboxDraw>
+}
+
+function DrawControl(props: ForwardedDrawControlProps) {
     const { onCreate, onUpdate, onDelete, onSelectionChange, forwardedRef, ...drawOptions } = props;
 
     const draw = useControl(
         () => new MapboxDraw(drawOptions),
-        ({ map }: any) => {
-            map.on('draw.create', onCreate)
-            map.on('draw.update', onUpdate)
-            map.on('draw.delete', onDelete)
-            map.on('draw.selectionchange', onSelectionChange)
+        ({ map }: { map: MapRef }) => {
+            const mapInstance = map.getMap();
+            if (onCreate) mapInstance.on('draw.create', onCreate)
+            if (onUpdate) mapInstance.on('draw.update', onUpdate)
+            if (onDelete) mapInstance.on('draw.delete', onDelete)
+            if (onSelectionChange) mapInstance.on('draw.selectionchange', onSelectionChange)
         },
-        ({ map }: any) => {
-            map.off('draw.create', onCreate)
-            map.off('draw.update', onUpdate)
-            map.off('draw.delete', onDelete)
-            map.off('draw.selectionchange', onSelectionChange)
+        ({ map }: { map: MapRef }) => {
+            const mapInstance = map.getMap();
+            if (onCreate) mapInstance.off('draw.create', onCreate)
+            if (onUpdate) mapInstance.off('draw.update', onUpdate)
+            if (onDelete) mapInstance.off('draw.delete', onDelete)
+            if (onSelectionChange) mapInstance.off('draw.selectionchange', onSelectionChange)
         },
         {
             position: props.position
@@ -47,9 +85,10 @@ function DrawControl(props: any) {
     return null
 }
 
-const ForwardedDrawControl = React.forwardRef((props: any, ref) => (
+const ForwardedDrawControl = React.forwardRef<MapboxDraw, DrawControlProps>((props, ref) => (
     <DrawControl {...props} forwardedRef={ref} />
 ));
+ForwardedDrawControl.displayName = 'ForwardedDrawControl';
 
 export default function MapComponent() {
     const mapRef = React.useRef<MapRef>(null)
@@ -65,17 +104,17 @@ export default function MapComponent() {
     const [projectToDelete, setProjectToDelete] = React.useState<{ id: string, name: string } | null>(null)
     const [isPreviewOpen, setIsPreviewOpen] = React.useState(false)
     const [selectedFeatureId, setSelectedFeatureId] = React.useState<string | null>(null)
-    const [selectedFeatureProps, setSelectedFeatureProps] = React.useState<Record<string, any>>({})
-    const [featuresList, setFeaturesList] = React.useState<any[]>([])
+    const [selectedFeatureProps, setSelectedFeatureProps] = React.useState<Record<string, unknown>>({})
+    const [featuresList, setFeaturesList] = React.useState<DrawFeature[]>([])
     // New: for "Create Another" workflow
-    const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, any> | null>(null)
+    const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, unknown> | null>(null)
 
     // Capture features from Context (DB) OR from Draw updates
     // Actually, simple solution: whenever Draw updates (Create, Delete, Update), we set 'featuresList' 
     // from drawRef.current.getAll().
     const syncFeaturesList = React.useCallback(() => {
         if (drawRef.current) {
-            setFeaturesList(drawRef.current.getAll().features)
+            setFeaturesList(drawRef.current.getAll().features as DrawFeature[])
         }
     }, [])
 
@@ -93,7 +132,7 @@ export default function MapComponent() {
 
             // 1. Get current Draw IDs
             const collection = draw?.getAll?.() || { features: [] };
-            const currentIds = new Set(collection.features.map(f => f.id as string));
+            const currentIds = new Set(collection.features.map((f: { id?: string | number }) => String(f.id)));
 
             // 2. Identify DB IDs
             const dbIds = new Set(dbFeatures.map(f => f.id));
@@ -123,7 +162,7 @@ export default function MapComponent() {
 
             // 4. Add/Update Features
             if (dbFeatures.length > 0) {
-                const fc: any = {
+                const fc = {
                     type: 'FeatureCollection',
                     features: dbFeatures.map(f => ({
                         type: 'Feature',
@@ -135,16 +174,17 @@ export default function MapComponent() {
 
                 // Prevent selection change handlers from firing during this sync
                 isSwapping.current = true;
-                draw?.add?.(fc);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                draw?.add?.(fc as any);
                 isSwapping.current = false;
             }
             syncFeaturesList()
         }
-    }, [activeProject, dbFeatures]) // Dependency list separate from logic
+    }, [activeProject, dbFeatures, syncFeaturesList, selectedFeatureId]) // Added selectedFeatureId and syncFeaturesList
 
 
     // Supabase Helpers
-    const insertFeature = async (feature: any, projectId: string) => {
+    const insertFeature = React.useCallback(async (feature: Partial<DrawFeature>, projectId: string) => {
         try {
             const { data, error } = await supabase.from('features').insert({
                 project_id: projectId,
@@ -158,13 +198,13 @@ export default function MapComponent() {
             console.error('Insert error:', error)
             throw error
         }
-    }
+    }, [supabase])
 
-    const updateFeature = async (id: string, updates: any) => {
+    const updateFeature = React.useCallback(async (id: string, updates: Record<string, unknown>) => {
         try {
             // whitelist allowed fields
             const allowed = ['geometry', 'properties', 'project_id'];
-            const payload: any = {};
+            const payload: Record<string, unknown> = {};
             for (const k of allowed) {
                 if (k in updates) payload[k] = updates[k];
             }
@@ -182,9 +222,9 @@ export default function MapComponent() {
             console.error('Update error:', error)
             throw error
         }
-    }
+    }, [supabase])
 
-    const deleteFeature = async (id: string) => {
+    const deleteFeature = React.useCallback(async (id: string) => {
         try {
             const { error } = await supabase.from('features').delete().eq('id', id)
             if (error) throw error
@@ -192,10 +232,10 @@ export default function MapComponent() {
             console.error('Delete error:', error)
             throw error
         }
-    }
+    }, [supabase])
 
     // Handlers
-    const onUpdate = React.useCallback(async (e: any) => {
+    const onUpdate = React.useCallback(async (e: DrawEvent) => {
         const { features } = e
         for (const feature of features) {
             if (activeProject && feature.id) {
@@ -208,15 +248,17 @@ export default function MapComponent() {
                     try {
                         await updateFeature(feature.id, { geometry: feature.geometry })
                     } catch (err) {
+                        // err is unknown, so we can't just access it.
+                        console.error(err)
                         toast.error('Failed to sync update')
                     }
                 }
             }
         }
         syncFeaturesList()
-    }, [activeProject, syncFeaturesList])
+    }, [activeProject, syncFeaturesList, updateFeature])
 
-    const onCreate = React.useCallback(async (e: any) => {
+    const onCreate = React.useCallback(async (e: DrawEvent) => {
         console.log('onCreate triggered', e);
         const { features } = e
         for (const feature of features) {
@@ -238,7 +280,7 @@ export default function MapComponent() {
                     drawRef.current.add({
                         ...feature,
                         properties: initialProps
-                    })
+                    } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
                 }
                 syncFeaturesList()
                 return;
@@ -259,7 +301,8 @@ export default function MapComponent() {
                         geometry: feature.geometry,
                         properties: initialProps // Use merged props
                     };
-                    drawRef.current.add(newFeature);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    drawRef.current.add(newFeature as any);
 
                     // Select the new feature immediately so UI is ready
                     drawRef.current.changeMode('simple_select', { featureIds: [newId] });
@@ -288,17 +331,17 @@ export default function MapComponent() {
             }
         }
         syncFeaturesList()
-    }, [activeProject, refreshFeatures, syncFeaturesList, pendingTemplate]) // Added pendingTemplate dep
+    }, [activeProject, refreshFeatures, syncFeaturesList, pendingTemplate, insertFeature])
 
     // New Handler for "Create Another"
-    const handleCreateAnother = (geometryType: string, currentProps: Record<string, any>) => {
+    const handleCreateAnother = (geometryType: string, currentProps: Record<string, unknown>) => {
         if (!drawRef.current) return;
 
         // set pending template keys (values empty)
         const templateKeys = Object.keys(currentProps).reduce((acc, key) => {
             acc[key] = '';
             return acc;
-        }, {} as Record<string, any>);
+        }, {} as Record<string, string>);
 
         setPendingTemplate(templateKeys);
 
@@ -308,11 +351,12 @@ export default function MapComponent() {
         else if (geometryType === 'LineString') mode = 'draw_line_string';
         else if (geometryType === 'Polygon') mode = 'draw_polygon';
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         drawRef.current.changeMode(mode as any);
         toast.info(`Draw a new ${geometryType} to apply template`);
     }
 
-    const onDelete = React.useCallback(async (e: any) => {
+    const onDelete = React.useCallback(async (e: DrawEvent) => {
         if (isSwapping.current) return;
 
         const { features } = e
@@ -326,6 +370,7 @@ export default function MapComponent() {
                     try {
                         await deleteFeature(feature.id)
                     } catch (err) {
+                        console.error(err);
                         toast.error('Failed to delete feature from DB')
                     }
                 }
@@ -334,9 +379,9 @@ export default function MapComponent() {
         if (activeProject) refreshFeatures()
         setSelectedFeatureId(null)
         syncFeaturesList()
-    }, [activeProject, refreshFeatures, syncFeaturesList])
+    }, [activeProject, refreshFeatures, syncFeaturesList, deleteFeature])
 
-    const onSelectionChange = React.useCallback((e: any) => {
+    const onSelectionChange = React.useCallback((e: DrawEvent) => {
         if (isSwapping.current) return;
 
         const { features } = e
@@ -364,12 +409,12 @@ export default function MapComponent() {
     React.useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
 
     // Stable handlers to pass to DrawControl
-    const stableOnCreate = React.useCallback((e: any) => onCreateRef.current(e), []);
-    const stableOnUpdate = React.useCallback((e: any) => onUpdateRef.current(e), []);
-    const stableOnDelete = React.useCallback((e: any) => onDeleteRef.current(e), []);
-    const stableOnSelectionChange = React.useCallback((e: any) => onSelectionChangeRef.current(e), []);
+    const stableOnCreate = React.useCallback((e: DrawEvent) => onCreateRef.current(e), []);
+    const stableOnUpdate = React.useCallback((e: DrawEvent) => onUpdateRef.current(e), []);
+    const stableOnDelete = React.useCallback((e: DrawEvent) => onDeleteRef.current(e), []);
+    const stableOnSelectionChange = React.useCallback((e: DrawEvent) => onSelectionChangeRef.current(e), []);
 
-    const handleAttributeSave = async (id: string, newProps: Record<string, any>) => {
+    const handleAttributeSave = async (id: string, newProps: Record<string, unknown>) => {
         if (!activeProject) return;
 
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -380,6 +425,7 @@ export default function MapComponent() {
                 await updateFeature(id, { properties: newProps })
                 toast.success('Changes saved successfully')
             } catch (err) {
+                console.error(err)
                 toast.error('Failed to update attributes')
                 return;
             }
@@ -399,7 +445,7 @@ export default function MapComponent() {
             };
 
             try {
-                const data = await insertFeature(featureToSave, activeProject.id);
+                const data = await insertFeature(featureToSave as Partial<DrawFeature>, activeProject.id);
 
                 // Swap ID in Mapbox Draw to the real UUID
                 isSwapping.current = true;
@@ -456,7 +502,7 @@ export default function MapComponent() {
         toast.success('Project created and active')
     }
 
-    const handleFeatureClick = (feature: any) => {
+    const handleFeatureClick = (feature: Feature) => {
         if (!drawRef.current) return;
 
         // Select in Draw
@@ -469,12 +515,15 @@ export default function MapComponent() {
 
         // Fly to feature
         const geom = feature.geometry;
-        if (geom.type === 'Point') {
-            mapRef.current?.flyTo({ center: geom.coordinates as [number, number], zoom: 15 });
-        } else if (geom.type === 'LineString' && geom.coordinates.length > 0) {
-            mapRef.current?.flyTo({ center: geom.coordinates[0] as [number, number], zoom: 15 });
-        } else if (geom.type === 'Polygon' && geom.coordinates.length > 0 && geom.coordinates[0].length > 0) {
-            mapRef.current?.flyTo({ center: geom.coordinates[0][0] as [number, number], zoom: 15 });
+        if (geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+             const [lng, lat] = geom.coordinates as [number, number];
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
+        } else if (geom.type === 'LineString' && Array.isArray(geom.coordinates) && geom.coordinates.length > 0) {
+             const [lng, lat] = geom.coordinates[0] as [number, number];
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
+        } else if (geom.type === 'Polygon' && Array.isArray(geom.coordinates) && geom.coordinates.length > 0 && Array.isArray(geom.coordinates[0]) && geom.coordinates[0].length > 0) {
+            const [lng, lat] = geom.coordinates[0][0] as [number, number];
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 15 });
         }
     }
 
@@ -487,13 +536,26 @@ export default function MapComponent() {
         }
     }
 
-    const getFeatureName = (f: any, index: number) => {
-        if (f.properties?.name) return f.properties.name;
-        if (f.properties?.title) return f.properties.title;
+    const getFeatureName = (f: Feature, index: number) => {
+        if (f.properties?.name && typeof f.properties.name === 'string') return f.properties.name;
+        if (f.properties?.title && typeof f.properties.title === 'string') return f.properties.title;
         // Search for any string property
         const firstString = Object.values(f.properties || {}).find(v => typeof v === 'string');
         if (firstString) return firstString as string;
         return `${f.geometry.type} ${index + 1}`
+    }
+
+    // Safely get geometry for Attribute Editor
+    const getEditorGeometry = () => {
+        const found = featuresList.find(f => f.id === selectedFeatureId);
+        if (found) {
+            return { type: found.geometry.type as Geometry['type'], coordinates: found.geometry.coordinates };
+        }
+        const dbFound = dbFeatures.find(f => f.id === selectedFeatureId);
+        if (dbFound) {
+            return dbFound.geometry;
+        }
+        return undefined;
     }
 
     return (
@@ -574,7 +636,10 @@ export default function MapComponent() {
                                             const confirmDelete = window.confirm("Delete this feature?");
                                             if (!confirmDelete) return;
 
-                                            onDelete({ features: [{ id: f.id }] });
+                                            // Construct event for onDelete
+                                            const mockEvent: DrawEvent = { features: [{ id: f.id, type: 'Feature', geometry: f.geometry, properties: f.properties || {} }] };
+                                            onDelete(mockEvent);
+
                                             if (drawRef.current) drawRef.current.delete(f.id);
                                         }}
                                     >
@@ -733,17 +798,29 @@ export default function MapComponent() {
                 selectedFeatureId && (
                     <div className="absolute top-4 right-14 z-20 w-96 bg-background/95 backdrop-blur-sm shadow-lg rounded-lg border p-4 max-h-[80vh] overflow-y-auto">
                         <AttributeEditor
+                            key={selectedFeatureId} // Force remount on feature change
                             featureId={selectedFeatureId}
                             initialProperties={selectedFeatureProps}
-                            featureGeometry={
-                                featuresList.find(f => f.id === selectedFeatureId)?.geometry ||
-                                dbFeatures.find(f => f.id === selectedFeatureId)?.geometry
-                            } // Pass geometry
+                            featureGeometry={getEditorGeometry()}
                             onSave={handleAttributeSave}
                             onDelete={() => {
                                 // Double confirmation removed - AttributeEditor handles the UI
                                 // Call onDelete with structure expected by Mapbox Draw / our handler
-                                onDelete({ features: [{ id: selectedFeatureId }] })
+                                // We need to mock the event structure
+                                const f = featuresList.find(feat => feat.id === selectedFeatureId) || dbFeatures.find(feat => feat.id === selectedFeatureId);
+                                if (f) {
+                                    // Ensure f is compatible with DrawFeature
+                                    // dbFeatures have 'properties' as Record<string, unknown>, which fits DrawFeature
+                                    // geometry is also compatible
+                                     const drawFeature: DrawFeature = {
+                                        id: f.id,
+                                        type: 'Feature',
+                                        geometry: f.geometry,
+                                        properties: f.properties || {}
+                                    };
+                                    onDelete({ features: [drawFeature] })
+                                }
+
                                 // Also remove from draw instance locally
                                 if (drawRef.current) {
                                     drawRef.current.delete(selectedFeatureId)

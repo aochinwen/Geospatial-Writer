@@ -1,11 +1,10 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash, Save } from 'lucide-react'
+import { Plus, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTemplates } from '@/hooks/useTemplates'
 import {
@@ -17,6 +16,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
+import { Geometry } from '@/types'
 
 export type KeyValue = {
     key: string
@@ -25,23 +25,30 @@ export type KeyValue = {
 
 interface AttributeEditorProps {
     featureId: string
-    initialProperties: Record<string, any>
-    featureGeometry?: any // GeoJSON Geometry
-    onSave: (id: string, properties: Record<string, any>) => void
+    initialProperties: Record<string, unknown>
+    featureGeometry?: { type: Geometry['type'], coordinates: unknown[] }
+    onSave: (id: string, properties: Record<string, unknown>) => void
     onDelete?: () => void
-    onCreateAnother: (geometryType: string, currentProps: Record<string, any>) => void
+    onCreateAnother: (geometryType: string, currentProps: Record<string, unknown>) => void
     onClose: () => void
 }
 
 export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onDelete, onClose, onCreateAnother }: AttributeEditorProps) {
-    const [attributes, setAttributes] = useState<KeyValue[]>([])
+    // Initialize state directly from props to avoid unnecessary effect
+    const [attributes, setAttributes] = useState<KeyValue[]>(() =>
+        Object.entries(initialProperties).map(([key, value]) => ({
+            key,
+            value: String(value)
+        }))
+    )
+
     const { templates, user } = useTemplates()
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [isDirty, setIsDirty] = useState(false)
     const [selectedTemplate, setSelectedTemplate] = useState<string>('')
 
     // Helper to check dirtiness
-    const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, any>) => {
+    const checkDirty = React.useCallback((currentAttrs: KeyValue[], initialProps: Record<string, unknown>) => {
         const currentObj: Record<string, string> = {};
         currentAttrs.forEach(a => { if (a.key.trim()) currentObj[a.key] = a.value });
 
@@ -53,30 +60,15 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
             if (currentObj[key] !== initialObj[key]) return true;
         }
         return false;
-    };
+    }, []);
 
-    useEffect(() => {
-        const attrs = Object.entries(initialProperties).map(([key, value]) => ({
-            key,
-            value: String(value)
-        }))
-        setAttributes(attrs)
-        setIsDirty(false)
-        setSelectedTemplate('') // Reset template selection on new feature load
-    }, [initialProperties, featureId])
-
+    // Update isDirty when attributes change
     useEffect(() => {
         setIsDirty(checkDirty(attributes, initialProperties));
-    }, [attributes, initialProperties])
+    }, [attributes, initialProperties, checkDirty])
 
     const handleAdd = () => {
         setAttributes([...attributes, { key: '', value: '' }])
-    }
-
-    const handleDelete = (index: number) => {
-        const newAttrs = [...attributes]
-        newAttrs.splice(index, 1)
-        setAttributes(newAttrs)
     }
 
     const handleChange = (index: number, field: 'key' | 'value', value: string) => {
@@ -86,7 +78,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     }
 
     const handleSave = () => {
-        const props: Record<string, any> = {}
+        const props: Record<string, string> = {}
         for (const attr of attributes) {
             if (!attr.key.trim()) continue
             props[attr.key] = attr.value
@@ -121,12 +113,12 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         if (!featureGeometry) return null;
         const type = featureGeometry.type;
         let details = '';
-        if (type === 'Point') {
-            const [lng, lat] = featureGeometry.coordinates;
+        if (type === 'Point' && Array.isArray(featureGeometry.coordinates) && featureGeometry.coordinates.length >= 2) {
+            const [lng, lat] = featureGeometry.coordinates as [number, number];
             details = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
-        } else if (type === 'LineString') {
+        } else if (type === 'LineString' && Array.isArray(featureGeometry.coordinates)) {
             details = `${featureGeometry.coordinates.length} points`; // Maybe show first/last?
-        } else if (type === 'Polygon') {
+        } else if (type === 'Polygon' && Array.isArray(featureGeometry.coordinates) && Array.isArray(featureGeometry.coordinates[0])) {
             details = `${featureGeometry.coordinates[0].length} points (closed)`;
         }
         return { type, details };
@@ -176,18 +168,12 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                             value={attr.value}
                             onChange={(e) => handleChange(index, 'value', e.target.value)}
                         />
-                        {/* 
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                            onClick={() => handleDelete(index)}
-                        >
-                            <Trash className="h-3 w-3" />
-                        </Button>
-                        */}
                     </div>
                 ))}
+
+                 <Button variant="ghost" size="sm" onClick={handleAdd} className="w-full text-xs h-7 dashed border">
+                    <Plus className="mr-2 h-3 w-3" /> Add Property
+                 </Button>
             </div>
 
             <div className="pt-4 mt-4 border-t space-y-2">
@@ -241,12 +227,10 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                     size="sm"
                     className="w-full"
                     onClick={() => {
-                        // Ensure saved first if dirty? Or just proceed?
-                        // User said "after created/save", implies we should save first if needed.
                         if (isDirty) handleSave();
 
                         // Prep props for next feature (current keys, empty values)
-                        const props: Record<string, any> = {}
+                        const props: Record<string, string> = {}
                         for (const attr of attributes) {
                             if (!attr.key.trim()) continue
                             props[attr.key] = attr.value
@@ -267,18 +251,11 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                         <Button onClick={() => setShowDeleteConfirm(true)} variant="destructive" size="sm" className="w-full">
                             <Trash className="mr-2 h-3 w-3" /> Delete Feature
                         </Button>
-
-                        {/* Custom Delete Modal reusing TemplateManager imports if possible, or simple Dialog */}
-                        <div className="absolute">
-                            {/* Hack: The Dialog requires standard imports. We'll rely on the one imported in Map or just minimal state here if we had the components. 
-                                Actually, we don't import Dialog components here yet. Need to add imports.
-                             */}
-                        </div>
                     </>
                 )}
             </div>
 
-            {/* Delete Dialog - rendered via Portal if possible, or just standard Dialog if we add imports */}
+            {/* Delete Dialog */}
             {onDelete && (
                 <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
                     <DialogContent>
@@ -302,3 +279,23 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     )
 }
 
+function Trash(props: React.SVGProps<SVGSVGElement>) {
+    return (
+        <svg
+            {...props}
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M3 6h18" />
+            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        </svg>
+    )
+}

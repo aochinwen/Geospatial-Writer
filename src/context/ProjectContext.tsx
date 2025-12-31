@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { User } from '@supabase/supabase-js'
 import { Project, Feature } from '@/types'
@@ -20,51 +20,65 @@ type ProjectContextType = {
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined)
 
 export function ProjectProvider({ children, initialUser }: { children: React.ReactNode, initialUser: User | null }) {
-    const [user, setUser] = useState<User | null>(initialUser)
+    const [user] = useState<User | null>(initialUser)
     const [projects, setProjects] = useState<Project[]>([])
     const [activeProject, setActiveProject] = useState<Project | null>(null)
     const [features, setFeatures] = useState<Feature[]>([])
     const [loading, setLoading] = useState(true)
 
-    const supabase = createClient()
+    // Stable supabase client
+    const supabase = useMemo(() => createClient(), [])
 
     useEffect(() => {
-        if (user) {
-            fetchProjects()
+        if (!user) return;
+        let cancelled = false;
+
+        const load = async () => {
+            setLoading(true)
+            const { data } = await supabase.from('projects').select('*').order('created_at', { ascending: false })
+            if (!cancelled) {
+                if (data) setProjects(data)
+                setLoading(false)
+            }
         }
-    }, [user])
+        load();
+
+        return () => { cancelled = true; }
+    }, [user, supabase])
 
     useEffect(() => {
-        if (activeProject) {
-            fetchFeatures(activeProject.id)
-        } else {
-            setFeatures([])
+        let cancelled = false;
+
+        const load = async () => {
+            if (activeProject) {
+                setLoading(true)
+                const { data } = await supabase.from('features').select('*').eq('project_id', activeProject.id)
+                if (!cancelled) {
+                    if (data) setFeatures(data)
+                    setLoading(false)
+                }
+            } else {
+                if (!cancelled) setFeatures([])
+            }
         }
-    }, [activeProject])
+        load();
 
-    const fetchProjects = async () => {
-        setLoading(true)
-        const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false })
-        if (data) setProjects(data)
-        setLoading(false)
-    }
+        return () => { cancelled = true; }
+    }, [activeProject, supabase])
 
-    const fetchFeatures = async (projectId: string) => {
-        setLoading(true)
-        const { data, error } = await supabase.from('features').select('*').eq('project_id', projectId)
-        if (data) setFeatures(data)
-        setLoading(false)
-    }
-
-    const refreshFeatures = async () => {
+    // Public version for refresh
+    const refreshFeatures = useCallback(async () => {
         if (activeProject) {
-            await fetchFeatures(activeProject.id)
+            setLoading(true)
+            const { data } = await supabase.from('features').select('*').eq('project_id', activeProject.id)
+            if (data) setFeatures(data)
+            setLoading(false)
         }
-    }
+    }, [activeProject, supabase])
 
     const createProject = async (name: string) => {
         if (!user) return null
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from('projects')
             .insert({ name, user_id: user.id })
             .select()
