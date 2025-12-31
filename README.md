@@ -40,6 +40,7 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 - **Feature Templates**: Manage reuseable property templates via the "Manage Global Templates" interface. Apply templates using a convenient dropdown in the Attribute Editor, with clear indication of the currently active template. Supports "My Templates" and "Shared Templates".
 - **Workflow Optimization**: "Create Another" button to quickly add multiple similar features.
 - **Hover Popups**: View feature properties instantly by hovering over map elements.
+- **Sign Up Integration**: Custom modal for new user registration capturing Name and Organization details, fully integrated with Supabase Auth and Profiles.
 
 ## Deploy on Vercel
 

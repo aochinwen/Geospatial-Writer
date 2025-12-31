@@ -1,4 +1,5 @@
-import { login, signup } from './actions'
+import { login } from './actions'
+import { SignUpModal } from '@/components/SignUpModal'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -26,7 +27,7 @@ export default function LoginPage() {
                         </div>
                         <div className="flex flex-col gap-2 mt-6">
                             <Button formAction={login} className="w-full">Log in</Button>
-                            <Button formAction={signup} variant="outline" className="w-full">Sign up</Button>
+                            <SignUpModal />
                         </div>
                     </form>
                 </CardContent>
