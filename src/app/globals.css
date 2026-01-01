@@ -74,3 +74,10 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Hide Mapbox Controls on Mobile */
+@media (max-width: 768px) {
+    .mapboxgl-ctrl-group {
+        display: none !important;
+    }
+}

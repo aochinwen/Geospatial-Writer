@@ -9,7 +9,7 @@ import { useProject } from '@/context/ProjectContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Plus, FolderOpen, MapPin, Route, Square, Trash2, LogOut, User, Map as MapIcon, Check, X, Edit, ChevronLeft } from 'lucide-react'
+import { Plus, FolderOpen, MapPin, Route, Square, Trash2, LogOut, User, Map as MapIcon, Check, X, Edit, ChevronLeft, BookTemplate } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { createClient } from '@/utils/supabase/client'
 import { toast } from 'sonner'
@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation'
 
 import AttributeEditor from './AttributeEditor'
 import { TemplateManager } from './TemplateManager'
+import { TemplateListContent } from './TemplateListContent'
 import { Feature } from '@/types'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
@@ -91,7 +92,7 @@ export default function MapComponent() {
     const [showUserMenu, setShowUserMenu] = React.useState(false)
 
     // Mobile State
-    const [mobileTab, setMobileTab] = React.useState<'map' | 'projects' | 'profile'>('map')
+    const [mobileTab, setMobileTab] = React.useState<'map' | 'projects' | 'profile' | 'templates'>('map')
     const [isDrawingMobile, setIsDrawingMobile] = React.useState(false)
     const [mobileEditMode, setMobileEditMode] = React.useState(false)
     const [showMobileDrawMenu, setShowMobileDrawMenu] = React.useState(false)
@@ -275,11 +276,11 @@ export default function MapComponent() {
                 toast.info('Feature added to local session')
                 // Update local props in draw if needed
                 if (drawRef.current) {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     drawRef.current.add({
                         ...feature,
                         type: 'Feature',
                         properties: initialProps
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     } as any)
                 }
                 syncFeaturesList()
@@ -484,11 +485,11 @@ export default function MapComponent() {
         if (drawRef.current && isUUID) {
             const f = drawRef.current.get(id)
             if (f) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 drawRef.current.add({
                     ...f,
                     type: 'Feature',
                     properties: newProps
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } as any)
             }
         }
@@ -958,16 +959,38 @@ export default function MapComponent() {
                                          return getFeatureName(f, 0);
                                     })()}
                                 </h4>
-                                <p className="text-xs text-muted-foreground">Tap edit to view details</p>
+                                 <p className="text-xs text-muted-foreground">Tap edit to view full details</p>
                              </div>
                         </div>
                         <Button variant="ghost" size="sm" onClick={() => setSelectedFeatureId(null)}>
                             <X className="h-4 w-4" />
                         </Button>
                      </div>
+
+                     {/* Mobile Read-only Properties List */}
+                     <div className="max-h-40 overflow-y-auto mb-4 bg-muted/30 rounded p-2 text-xs space-y-1">
+                        {(() => {
+                            const f = featuresList.find(f => f.id === selectedFeatureId) || dbFeatures.find(f => f.id === selectedFeatureId);
+                            const props = f?.properties || {};
+                            const entries = Object.entries(props).filter(([k]) => {
+                                const lower = k.toLowerCase();
+                                return !['id', 'meta', 'active', 'mode', 'project_id'].some(x => lower.includes(x));
+                            });
+
+                            if (entries.length === 0) return <div className="text-muted-foreground italic">No properties set</div>;
+
+                            return entries.map(([k, v]) => (
+                                <div key={k} className="flex gap-2 border-b border-border/50 pb-1 last:border-0">
+                                    <span className="font-semibold text-muted-foreground min-w-[30%] truncate">{k}:</span>
+                                    <span className="break-all">{String(v)}</span>
+                                </div>
+                            ));
+                        })()}
+                     </div>
+
                      <div className="flex gap-2">
                          <Button className="flex-1" onClick={() => setMobileEditMode(true)}>
-                            <Edit className="mr-2 h-4 w-4" /> Edit
+                            <Edit className="mr-2 h-4 w-4" /> Edit Attributes
                          </Button>
                      </div>
                 </div>
@@ -1108,6 +1131,14 @@ export default function MapComponent() {
                 </Button>
                 <Button
                     variant="ghost"
+                    className={`flex flex-col items-center gap-1 h-auto py-2 ${mobileTab === 'templates' ? 'text-primary' : 'text-muted-foreground'}`}
+                    onClick={() => setMobileTab('templates')}
+                >
+                    <BookTemplate className="h-5 w-5" />
+                    <span className="text-[10px]">Templates</span>
+                </Button>
+                <Button
+                    variant="ghost"
                     className={`flex flex-col items-center gap-1 h-auto py-2 ${mobileTab === 'profile' ? 'text-primary' : 'text-muted-foreground'}`}
                     onClick={() => setMobileTab('profile')}
                 >
@@ -1183,6 +1214,26 @@ export default function MapComponent() {
                 </div>
             )}
 
+            {/* Mobile Templates View */}
+            {mobileTab === 'templates' && (
+                <div className="md:hidden absolute inset-0 z-10 bg-background flex flex-col pb-16">
+                    <div className="p-4 border-b flex justify-between items-center bg-card">
+                        <h2 className="text-lg font-semibold">Template Library</h2>
+                    </div>
+                    <div className="flex-1 overflow-hidden p-4">
+                        <TemplateListContent onApplyParams={(props) => {
+                            if (drawRef.current) {
+                                setPendingTemplate(props);
+                                setMobileTab('map');
+                                // Could activate draw mode here too if we wanted
+                                setShowMobileDrawMenu(true);
+                                toast.info('Template applied. Select a tool to draw.');
+                            }
+                        }} />
+                    </div>
+                </div>
+            )}
+
             {/* Mobile Profile View */}
             {mobileTab === 'profile' && (
                 <div className="md:hidden absolute inset-0 z-10 bg-background flex flex-col pb-16">
@@ -1198,21 +1249,6 @@ export default function MapComponent() {
                                 <Button variant="destructive" className="w-full" onClick={handleSignOut}>
                                     <LogOut className="mr-2 h-4 w-4" /> Sign Out
                                 </Button>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader className="p-4 pb-2">
-                                <CardTitle className="text-sm font-medium uppercase text-muted-foreground flex items-center gap-2">
-                                    Template Library
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="p-4 pt-2">
-                                <TemplateManager trigger={
-                                    <Button variant="secondary" className="w-full">
-                                        <FolderOpen className="mr-2 h-4 w-4" /> Manage Global Templates
-                                    </Button>
-                                } />
                             </CardContent>
                         </Card>
                     </div>
