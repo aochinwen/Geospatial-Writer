@@ -9,7 +9,7 @@ import { useProject } from '@/context/ProjectContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Plus, FolderOpen, MapPin, Route, Square, Trash2, LogOut, User } from 'lucide-react'
+import { Plus, FolderOpen, MapPin, Route, Square, Trash2, LogOut, User, Map as MapIcon, Check, X, Edit, ChevronLeft } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { createClient } from '@/utils/supabase/client'
 import { toast } from 'sonner'
@@ -90,6 +90,12 @@ export default function MapComponent() {
     const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, unknown> | null>(null)
     const [showUserMenu, setShowUserMenu] = React.useState(false)
 
+    // Mobile State
+    const [mobileTab, setMobileTab] = React.useState<'map' | 'projects' | 'profile'>('map')
+    const [isDrawingMobile, setIsDrawingMobile] = React.useState(false)
+    const [mobileEditMode, setMobileEditMode] = React.useState(false)
+    const [showMobileDrawMenu, setShowMobileDrawMenu] = React.useState(false)
+
     // Capture features from Context (DB) OR from Draw updates
     // Actually, simple solution: whenever Draw updates (Create, Delete, Update), we set 'featuresList' 
     // from drawRef.current.getAll().
@@ -167,6 +173,7 @@ export default function MapComponent() {
 
                 // Prevent selection change handlers from firing during this sync
                 isSwapping.current = true;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 draw?.add?.(fc as any);
                 isSwapping.current = false;
             }
@@ -268,6 +275,7 @@ export default function MapComponent() {
                 toast.info('Feature added to local session')
                 // Update local props in draw if needed
                 if (drawRef.current) {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     drawRef.current.add({
                         ...feature,
                         type: 'Feature',
@@ -295,6 +303,7 @@ export default function MapComponent() {
                         project_id: activeProject?.id || ''
                     };
                     // Mapbox Draw expects a specific format, Feature matches enough
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     drawRef.current.add(newFeature as any);
 
                     // Select the new feature immediately so UI is ready
@@ -475,6 +484,7 @@ export default function MapComponent() {
         if (drawRef.current && isUUID) {
             const f = drawRef.current.get(id)
             if (f) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 drawRef.current.add({
                     ...f,
                     type: 'Feature',
@@ -586,7 +596,7 @@ export default function MapComponent() {
     return (
         <div className="relative w-full h-full flex">
             {/* Top Left Project Controls */}
-            <div className="absolute top-4 left-4 z-10 w-80 space-y-2 flex flex-col max-h-[calc(100%-2rem)]">
+            <div className="hidden md:flex absolute top-4 left-4 z-10 w-80 space-y-2 flex-col max-h-[calc(100%-2rem)]">
                 {/* Template Database Component */}
                 <Card className="shrink-0">
                     <CardHeader className="p-4 pb-2">
@@ -676,7 +686,7 @@ export default function MapComponent() {
             </div>
 
             {/* User Account FAB */}
-            <div className="absolute bottom-4 left-4 z-10 flex flex-col-reverse items-start gap-2">
+            <div className="hidden md:flex absolute bottom-4 left-4 z-10 flex-col-reverse items-start gap-2">
                 <Button
                     variant="outline"
                     size="icon"
@@ -824,7 +834,9 @@ export default function MapComponent() {
                     mapStyle="mapbox://styles/mapbox/streets-v11"
                     mapboxAccessToken={TOKEN}
                 >
-                    <NavigationControl position="bottom-right" />
+                    <div className="hidden md:block">
+                        <NavigationControl position="bottom-right" />
+                    </div>
                     <ForwardedDrawControl
                         ref={drawRef}
                         position="top-right"
@@ -892,10 +904,10 @@ export default function MapComponent() {
                 </MapGL>
             </div>
 
-            {/* Attribute Editor - Floating Panel */}
+            {/* Attribute Editor - Floating Panel (Desktop) */}
             {
                 selectedFeatureId && (
-                    <div className="absolute top-4 right-14 z-20 w-96 bg-background/95 backdrop-blur-sm shadow-lg rounded-lg border p-4 max-h-[80vh] overflow-y-auto">
+                    <div className="hidden md:block absolute top-4 right-14 z-20 w-96 bg-background/95 backdrop-blur-sm shadow-lg rounded-lg border p-4 max-h-[80vh] overflow-y-auto">
                         <AttributeEditor
                             key={selectedFeatureId}
                             featureId={selectedFeatureId}
@@ -928,6 +940,284 @@ export default function MapComponent() {
                 )
             }
 
+            {/* Mobile Feature Summary Sheet */}
+            {selectedFeatureId && mobileTab === 'map' && !mobileEditMode && (
+                <div className="md:hidden absolute bottom-16 left-0 right-0 z-10 bg-background border-t p-4 pb-6 shadow-2xl animate-in slide-in-from-bottom-4">
+                     <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                             {(() => {
+                                const f = featuresList.find(f => f.id === selectedFeatureId) || dbFeatures.find(f => f.id === selectedFeatureId);
+                                if (!f) return <MapPin className="h-5 w-5" />;
+                                return getFeatureIcon(f.geometry.type);
+                             })()}
+                             <div>
+                                <h4 className="font-semibold text-sm">
+                                    {(() => {
+                                         const f = featuresList.find(f => f.id === selectedFeatureId) || dbFeatures.find(f => f.id === selectedFeatureId);
+                                         if (!f) return 'Unknown Feature';
+                                         return getFeatureName(f, 0);
+                                    })()}
+                                </h4>
+                                <p className="text-xs text-muted-foreground">Tap edit to view details</p>
+                             </div>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => setSelectedFeatureId(null)}>
+                            <X className="h-4 w-4" />
+                        </Button>
+                     </div>
+                     <div className="flex gap-2">
+                         <Button className="flex-1" onClick={() => setMobileEditMode(true)}>
+                            <Edit className="mr-2 h-4 w-4" /> Edit
+                         </Button>
+                     </div>
+                </div>
+            )}
+
+            {/* Mobile Full Screen Attribute Editor */}
+            {selectedFeatureId && mobileEditMode && (
+                <div className="md:hidden fixed inset-0 z-50 bg-background flex flex-col">
+                    <div className="flex items-center p-4 border-b">
+                        <Button variant="ghost" size="icon" onClick={() => setMobileEditMode(false)}>
+                            <ChevronLeft className="h-5 w-5" />
+                        </Button>
+                        <h2 className="font-semibold ml-2">Edit Feature</h2>
+                    </div>
+                    <div className="flex-1 overflow-hidden p-4">
+                        <AttributeEditor
+                            key={`mobile-${selectedFeatureId}`}
+                            featureId={selectedFeatureId}
+                            initialProperties={selectedFeatureProps}
+                            featureGeometry={
+                                featuresList.find(f => f.id === selectedFeatureId)?.geometry ||
+                                dbFeatures.find(f => f.id === selectedFeatureId)?.geometry
+                            }
+                            onSave={handleAttributeSave}
+                            onDelete={() => {
+                                onDelete({ features: [{ id: selectedFeatureId } as Feature] })
+                                if (drawRef.current) {
+                                    drawRef.current.delete(selectedFeatureId)
+                                    setSelectedFeatureId(null)
+                                    setMobileEditMode(false)
+                                }
+                            }}
+                            onClose={() => setMobileEditMode(false)}
+                            onCreateAnother={(type, props) => {
+                                setMobileEditMode(false)
+                                handleCreateAnother(type, props)
+                            }}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* Mobile Map Controls (FAB) */}
+            {mobileTab === 'map' && !isDrawingMobile && !mobileEditMode && !selectedFeatureId && (
+                <div className="md:hidden absolute bottom-20 right-4 z-10 flex flex-col gap-2">
+                    <Dialog open={showMobileDrawMenu} onOpenChange={setShowMobileDrawMenu}>
+                         {/* Trigger handled manually or via a button that opens state */}
+                    </Dialog>
+
+                    {showMobileDrawMenu && (
+                         <div className="absolute bottom-14 right-0 flex flex-col gap-2 animate-in slide-in-from-bottom-2 fade-in duration-200">
+                              <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
+                                  if(drawRef.current) {
+                                      drawRef.current.changeMode('draw_point');
+                                      setIsDrawingMobile(true);
+                                      setShowMobileDrawMenu(false);
+                                      toast.info('Tap map to place point');
+                                  }
+                              }}>
+                                   <MapPin className="h-4 w-4" />
+                              </Button>
+                              <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
+                                  if(drawRef.current) {
+                                      drawRef.current.changeMode('draw_line_string');
+                                      setIsDrawingMobile(true);
+                                      setShowMobileDrawMenu(false);
+                                      toast.info('Tap to draw line');
+                                  }
+                              }}>
+                                   <Route className="h-4 w-4" />
+                              </Button>
+                              <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
+                                  if(drawRef.current) {
+                                      drawRef.current.changeMode('draw_polygon');
+                                      setIsDrawingMobile(true);
+                                      setShowMobileDrawMenu(false);
+                                      toast.info('Tap to draw area');
+                                  }
+                              }}>
+                                   <Square className="h-4 w-4" />
+                              </Button>
+                         </div>
+                    )}
+
+                    <Button
+                        size="icon"
+                        className={`h-14 w-14 rounded-full shadow-lg transition-transform ${showMobileDrawMenu ? 'rotate-45' : ''}`}
+                        onClick={() => setShowMobileDrawMenu(!showMobileDrawMenu)}
+                    >
+                        <Plus className="h-6 w-6" />
+                    </Button>
+                </div>
+            )}
+
+            {/* Mobile Drawing Actions (Finish/Cancel) */}
+            {isDrawingMobile && (
+                 <div className="md:hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 flex gap-4 bg-background/80 backdrop-blur rounded-full p-2 shadow-lg border">
+                      <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-destructive" onClick={() => {
+                          if(drawRef.current) {
+                              drawRef.current.changeMode('simple_select');
+                              drawRef.current.deleteAll(); // Or just delete the one in progress? usually deleting all clears temp
+                              setIsDrawingMobile(false);
+                          }
+                      }}>
+                          <X className="h-6 w-6" />
+                      </Button>
+                      <Button variant="default" size="icon" className="h-10 w-10 rounded-full bg-green-500 hover:bg-green-600" onClick={() => {
+                          // Mapbox Draw finishes on 'enter' or double click.
+                          // We can programmatically change mode to simple_select to 'finish'
+                          if(drawRef.current) {
+                             drawRef.current.changeMode('simple_select');
+                             // The 'create' event will fire if valid
+                             setIsDrawingMobile(false);
+                          }
+                      }}>
+                          <Check className="h-6 w-6" />
+                      </Button>
+                 </div>
+            )}
+
+            {/* Mobile Bottom Navigation */}
+            <div className="md:hidden absolute bottom-0 left-0 right-0 h-16 bg-background border-t z-20 flex justify-around items-center pb-safe">
+                <Button
+                    variant="ghost"
+                    className={`flex flex-col items-center gap-1 h-auto py-2 ${mobileTab === 'map' ? 'text-primary' : 'text-muted-foreground'}`}
+                    onClick={() => setMobileTab('map')}
+                >
+                    <MapIcon className="h-5 w-5" />
+                    <span className="text-[10px]">Map</span>
+                </Button>
+                <Button
+                    variant="ghost"
+                    className={`flex flex-col items-center gap-1 h-auto py-2 ${mobileTab === 'projects' ? 'text-primary' : 'text-muted-foreground'}`}
+                    onClick={() => setMobileTab('projects')}
+                >
+                    <FolderOpen className="h-5 w-5" />
+                    <span className="text-[10px]">Projects</span>
+                </Button>
+                <Button
+                    variant="ghost"
+                    className={`flex flex-col items-center gap-1 h-auto py-2 ${mobileTab === 'profile' ? 'text-primary' : 'text-muted-foreground'}`}
+                    onClick={() => setMobileTab('profile')}
+                >
+                    <User className="h-5 w-5" />
+                    <span className="text-[10px]">Profile</span>
+                </Button>
+            </div>
+
+            {/* Mobile Projects View */}
+            {mobileTab === 'projects' && (
+                <div className="md:hidden absolute inset-0 z-10 bg-background flex flex-col pb-16">
+                    <div className="p-4 border-b flex justify-between items-center bg-card">
+                        <h2 className="text-lg font-semibold">Projects</h2>
+                    </div>
+                    <div className="p-4 flex-1 overflow-y-auto space-y-4">
+                        {/* New Project Input */}
+                        <div className="flex gap-2 mb-6">
+                            <Input placeholder="New Project Name" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} />
+                            <Button onClick={handleCreateProject} size="icon"><Plus className="h-4 w-4" /></Button>
+                        </div>
+
+                        {/* Current Project Card */}
+                        <Card>
+                            <CardHeader className="p-4 pb-2">
+                                <CardTitle className="text-sm font-medium uppercase text-muted-foreground">Current</CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4 pt-2">
+                                {activeProject ? (
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-bold truncate">{activeProject.name}</span>
+                                        <Button size="sm" variant="outline" onClick={() => setIsPreviewOpen(true)}>
+                                            Export
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <span className="text-muted-foreground italic">None selected</span>
+                                )}
+                            </CardContent>
+                        </Card>
+
+                        {/* Project List */}
+                        <div>
+                            <h4 className="text-sm font-medium mb-2 text-muted-foreground uppercase">All Projects</h4>
+                            <div className="space-y-2">
+                                {projects.length === 0 && <p className="text-sm text-neutral-500">No projects found.</p>}
+                                {projects.map(p => (
+                                    <Card key={p.id} className={`overflow-hidden ${activeProject?.id === p.id ? 'border-primary' : ''}`}>
+                                        <div className="flex items-center p-3">
+                                            <div
+                                                className="flex-1 font-medium truncate cursor-pointer"
+                                                onClick={() => {
+                                                    setActiveProject(p);
+                                                    setMobileTab('map');
+                                                    toast.success(`Switched to ${p.name}`);
+                                                }}
+                                            >
+                                                {p.name}
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                                onClick={() => setProjectToDelete(p)}
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </Card>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Mobile Profile View */}
+            {mobileTab === 'profile' && (
+                <div className="md:hidden absolute inset-0 z-10 bg-background flex flex-col pb-16">
+                     <div className="p-4 border-b flex justify-between items-center bg-card">
+                        <h2 className="text-lg font-semibold">Profile</h2>
+                    </div>
+                    <div className="p-4 space-y-4">
+                        <Card>
+                             <CardHeader>
+                                <CardTitle className="text-base">{user?.email}</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <Button variant="destructive" className="w-full" onClick={handleSignOut}>
+                                    <LogOut className="mr-2 h-4 w-4" /> Sign Out
+                                </Button>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader className="p-4 pb-2">
+                                <CardTitle className="text-sm font-medium uppercase text-muted-foreground flex items-center gap-2">
+                                    Template Library
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4 pt-2">
+                                <TemplateManager trigger={
+                                    <Button variant="secondary" className="w-full">
+                                        <FolderOpen className="mr-2 h-4 w-4" /> Manage Global Templates
+                                    </Button>
+                                } />
+                            </CardContent>
+                        </Card>
+                    </div>
+                </div>
+            )}
 
         </div >
     )
