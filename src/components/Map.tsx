@@ -943,7 +943,7 @@ export default function MapComponent() {
 
             {/* Mobile Feature Summary Sheet */}
             {selectedFeatureId && mobileTab === 'map' && !mobileEditMode && (
-                <div className="md:hidden absolute bottom-16 left-0 right-0 z-10 bg-background border-t p-4 pb-6 shadow-2xl animate-in slide-in-from-bottom-4">
+                <div className="md:hidden fixed bottom-16 left-0 right-0 z-30 bg-background border-t p-4 pb-6 shadow-2xl animate-in slide-in-from-bottom-4">
                      <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
                              {(() => {
@@ -1035,7 +1035,7 @@ export default function MapComponent() {
 
             {/* Mobile Map Controls (FAB) */}
             {mobileTab === 'map' && !isDrawingMobile && !mobileEditMode && !selectedFeatureId && (
-                <div className="md:hidden absolute bottom-20 right-4 z-10 flex flex-col gap-2">
+                <div className="md:hidden fixed bottom-20 right-4 z-30 flex flex-col gap-2">
                     <Dialog open={showMobileDrawMenu} onOpenChange={setShowMobileDrawMenu}>
                          {/* Trigger handled manually or via a button that opens state */}
                     </Dialog>
@@ -1087,7 +1087,7 @@ export default function MapComponent() {
 
             {/* Mobile Drawing Actions (Finish/Cancel) */}
             {isDrawingMobile && (
-                 <div className="md:hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 flex gap-4 bg-background/80 backdrop-blur rounded-full p-2 shadow-lg border">
+                 <div className="md:hidden fixed top-4 left-1/2 -translate-x-1/2 z-40 flex gap-4 bg-background/80 backdrop-blur rounded-full p-2 shadow-lg border">
                       <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-destructive" onClick={() => {
                           if(drawRef.current) {
                               drawRef.current.changeMode('simple_select');
@@ -1112,7 +1112,7 @@ export default function MapComponent() {
             )}
 
             {/* Mobile Bottom Navigation */}
-            <div className="md:hidden absolute bottom-0 left-0 right-0 h-16 bg-background border-t z-20 flex justify-around items-center pb-safe">
+            <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-background border-t z-40 flex justify-around items-center pb-2">
                 <Button
                     variant="ghost"
                     className={`flex flex-col items-center gap-1 h-auto py-2 ${mobileTab === 'map' ? 'text-primary' : 'text-muted-foreground'}`}
@@ -1149,7 +1149,7 @@ export default function MapComponent() {
 
             {/* Mobile Projects View */}
             {mobileTab === 'projects' && (
-                <div className="md:hidden absolute inset-0 z-10 bg-background flex flex-col pb-16">
+                <div className="md:hidden fixed inset-0 z-30 bg-background flex flex-col pb-16">
                     <div className="p-4 border-b flex justify-between items-center bg-card">
                         <h2 className="text-lg font-semibold">Projects</h2>
                     </div>
@@ -1216,7 +1216,7 @@ export default function MapComponent() {
 
             {/* Mobile Templates View */}
             {mobileTab === 'templates' && (
-                <div className="md:hidden absolute inset-0 z-10 bg-background flex flex-col pb-16">
+                <div className="md:hidden fixed inset-0 z-30 bg-background flex flex-col pb-16">
                     <div className="p-4 border-b flex justify-between items-center bg-card">
                         <h2 className="text-lg font-semibold">Template Library</h2>
                     </div>
@@ -1236,7 +1236,7 @@ export default function MapComponent() {
 
             {/* Mobile Profile View */}
             {mobileTab === 'profile' && (
-                <div className="md:hidden absolute inset-0 z-10 bg-background flex flex-col pb-16">
+                <div className="md:hidden fixed inset-0 z-30 bg-background flex flex-col pb-16">
                      <div className="p-4 border-b flex justify-between items-center bg-card">
                         <h2 className="text-lg font-semibold">Profile</h2>
                     </div>
