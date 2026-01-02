@@ -239,13 +239,23 @@ export default function MapComponent() {
     // Supabase Helpers
     const insertFeature = React.useCallback(async (feature: Feature, projectId: string) => {
         try {
-            const { data, error } = await supabase.from('features').insert({
+            // Respect client-side ID if it is a valid UUID
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(feature.id as string);
+
+            const payload = {
                 project_id: projectId,
                 geometry: feature.geometry,
-                properties: feature.properties || {}
-            }).select().single()
+                properties: feature.properties || {},
+                ...(isUUID ? { id: feature.id } : {})
+            }
+
+            const { data, error } = await supabase.from('features').insert(payload)
+                .select()
+                .maybeSingle()
 
             if (error) throw error
+            if (!data) throw new Error('Insert successful but no data returned (RLS?)')
+
             return data
         } catch (error) {
             console.error('Insert error:', error)
