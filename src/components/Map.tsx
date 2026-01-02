@@ -19,6 +19,9 @@ import AttributeEditor from './AttributeEditor'
 import { TemplateManager } from './TemplateManager'
 import { TemplateListContent } from './TemplateListContent'
 import { Feature } from '@/types'
+import { convertGeoJSON, SPATIAL_REFERENCES, SpatialReference } from '@/utils/coordinates'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 
@@ -118,6 +121,7 @@ export default function MapComponent() {
 
     const isSwapping = React.useRef(false)
     const [hoverInfo, setHoverInfo] = React.useState<{ longitude: number, latitude: number, feature: Feature } | null>(null)
+    const [exportCRS, setExportCRS] = React.useState<SpatialReference>('WGS84')
 
     // EFFECT: Handle Project Switching - Load Data
     const selectedFeatureIdRef = React.useRef(selectedFeatureId)
@@ -129,6 +133,12 @@ export default function MapComponent() {
         const draw = drawRef.current;
         if (draw && activeProject && dbFeatures) {
             // Smart Sync: Diff instead of clear-all
+
+            // Skip sync if user is currently drawing (prevents interrupting "Create Another" or active drawing)
+            const mode = draw.getMode();
+            if (mode.startsWith('draw_')) {
+                return;
+            }
 
             // 1. Get current Draw IDs
             const collection = draw?.getAll?.() || { features: [] };
@@ -280,7 +290,7 @@ export default function MapComponent() {
                         ...feature,
                         type: 'Feature',
                         properties: initialProps
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     } as any)
                 }
                 syncFeaturesList()
@@ -489,7 +499,7 @@ export default function MapComponent() {
                     ...f,
                     type: 'Feature',
                     properties: newProps
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } as any)
             }
         }
@@ -578,7 +588,15 @@ export default function MapComponent() {
         // Query features under the cursor
         // We filter for features that are likely ours (e.g. have an ID or geometry)
         // Note: mapbox-gl-draw layers usually start with 'gl-draw'
-        const features = event.target.queryRenderedFeatures(point);
+        if (!event.target.isStyleLoaded()) return;
+
+        let features;
+        try {
+            features = event.target.queryRenderedFeatures(point);
+        } catch (e) {
+            console.warn('Map query failed:', e);
+            return;
+        }
         const drawFeature = features.find((f) => f.source && String(f.source).includes('mapbox-gl-draw'));
 
         if (drawFeature) {
@@ -715,39 +733,70 @@ export default function MapComponent() {
             <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
                 <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
                     <DialogHeader>
-                        <DialogTitle>GeoJSON Preview</DialogTitle>
+                        <DialogTitle>GeoJSON Preview & Export</DialogTitle>
                     </DialogHeader>
-                    <div className="flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-900 p-4 rounded text-xs font-mono">
-                        <pre>{JSON.stringify({
-                            type: 'FeatureCollection',
-                            features: dbFeatures.map(f => ({
-                                type: 'Feature',
-                                geometry: f.geometry,
-                                properties: f.properties
-                            }))
-                        }, null, 2)}</pre>
+
+                    <div className="flex items-center gap-4 py-2">
+                        <div className="grid w-full max-w-sm items-center gap-1.5">
+                            <Label htmlFor="crs-select">Spatial Reference System</Label>
+                            <Select value={exportCRS} onValueChange={(v) => setExportCRS(v as SpatialReference)}>
+                                <SelectTrigger id="crs-select" className="w-[280px]">
+                                    <SelectValue placeholder="Select Coordinate System" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {SPATIAL_REFERENCES.map((ref) => (
+                                        <SelectItem key={ref.value} value={ref.value}>
+                                            {ref.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
-                    <div className="flex justify-end pt-4">
-                        <Button onClick={() => {
-                            const data = JSON.stringify({
+
+                    <div className="flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-900 p-4 rounded text-xs font-mono">
+                        <pre>{React.useMemo(() => {
+                            const baseValues = {
                                 type: 'FeatureCollection',
                                 features: dbFeatures.map(f => ({
                                     type: 'Feature',
                                     geometry: f.geometry,
                                     properties: f.properties
                                 }))
-                            }, null, 2)
-                            const blob = new Blob([data], { type: 'application/geo+json' })
-                            const url = URL.createObjectURL(blob)
-                            const a = document.createElement('a')
-                            a.href = url
-                            a.download = `${activeProject?.name || 'export'}.geojson`
-                            document.body.appendChild(a)
-                            a.click()
-                            document.body.removeChild(a)
-                            URL.revokeObjectURL(url)
-                            setIsPreviewOpen(false)
-                            toast.success('Export downloaded')
+                            };
+                            return JSON.stringify(convertGeoJSON(baseValues, exportCRS), null, 2);
+                        }, [dbFeatures, exportCRS])}</pre>
+                    </div>
+                    <div className="flex justify-end pt-4">
+                        <Button onClick={() => {
+                            try {
+                                const baseValues = {
+                                    type: 'FeatureCollection',
+                                    features: dbFeatures.map(f => ({
+                                        type: 'Feature',
+                                        geometry: f.geometry,
+                                        properties: f.properties
+                                    }))
+                                };
+
+                                const transformedData = convertGeoJSON(baseValues, exportCRS);
+                                const data = JSON.stringify(transformedData, null, 2)
+
+                                const blob = new Blob([data], { type: 'application/geo+json' })
+                                const url = URL.createObjectURL(blob)
+                                const a = document.createElement('a')
+                                a.href = url
+                                a.download = `${activeProject?.name || 'export'}_${exportCRS}.geojson`
+                                document.body.appendChild(a)
+                                a.click()
+                                document.body.removeChild(a)
+                                URL.revokeObjectURL(url)
+                                setIsPreviewOpen(false)
+                                toast.success(`Exported as ${exportCRS}`)
+                            } catch (e) {
+                                console.error(e);
+                                toast.error('Export failed: ' + (e as Error).message);
+                            }
                         }}>
                             Download .geojson
                         </Button>
@@ -944,31 +993,31 @@ export default function MapComponent() {
             {/* Mobile Feature Summary Sheet */}
             {selectedFeatureId && mobileTab === 'map' && !mobileEditMode && (
                 <div className="md:hidden fixed bottom-16 left-0 right-0 z-30 bg-background border-t p-4 pb-6 shadow-2xl animate-in slide-in-from-bottom-4">
-                     <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
-                             {(() => {
+                            {(() => {
                                 const f = featuresList.find(f => f.id === selectedFeatureId) || dbFeatures.find(f => f.id === selectedFeatureId);
                                 if (!f) return <MapPin className="h-5 w-5" />;
                                 return getFeatureIcon(f.geometry.type);
-                             })()}
-                             <div>
+                            })()}
+                            <div>
                                 <h4 className="font-semibold text-sm">
                                     {(() => {
-                                         const f = featuresList.find(f => f.id === selectedFeatureId) || dbFeatures.find(f => f.id === selectedFeatureId);
-                                         if (!f) return 'Unknown Feature';
-                                         return getFeatureName(f, 0);
+                                        const f = featuresList.find(f => f.id === selectedFeatureId) || dbFeatures.find(f => f.id === selectedFeatureId);
+                                        if (!f) return 'Unknown Feature';
+                                        return getFeatureName(f, 0);
                                     })()}
                                 </h4>
-                                 <p className="text-xs text-muted-foreground">Tap edit to view full details</p>
-                             </div>
+                                <p className="text-xs text-muted-foreground">Tap edit to view full details</p>
+                            </div>
                         </div>
                         <Button variant="ghost" size="sm" onClick={() => setSelectedFeatureId(null)}>
                             <X className="h-4 w-4" />
                         </Button>
-                     </div>
+                    </div>
 
-                     {/* Mobile Read-only Properties List */}
-                     <div className="max-h-40 overflow-y-auto mb-4 bg-muted/30 rounded p-2 text-xs space-y-1">
+                    {/* Mobile Read-only Properties List */}
+                    <div className="max-h-40 overflow-y-auto mb-4 bg-muted/30 rounded p-2 text-xs space-y-1">
                         {(() => {
                             const f = featuresList.find(f => f.id === selectedFeatureId) || dbFeatures.find(f => f.id === selectedFeatureId);
                             const props = f?.properties || {};
@@ -986,13 +1035,13 @@ export default function MapComponent() {
                                 </div>
                             ));
                         })()}
-                     </div>
+                    </div>
 
-                     <div className="flex gap-2">
-                         <Button className="flex-1" onClick={() => setMobileEditMode(true)}>
+                    <div className="flex gap-2">
+                        <Button className="flex-1" onClick={() => setMobileEditMode(true)}>
                             <Edit className="mr-2 h-4 w-4" /> Edit Attributes
-                         </Button>
-                     </div>
+                        </Button>
+                    </div>
                 </div>
             )}
 
@@ -1037,42 +1086,42 @@ export default function MapComponent() {
             {mobileTab === 'map' && !isDrawingMobile && !mobileEditMode && !selectedFeatureId && (
                 <div className="md:hidden fixed bottom-20 right-4 z-30 flex flex-col gap-2">
                     <Dialog open={showMobileDrawMenu} onOpenChange={setShowMobileDrawMenu}>
-                         {/* Trigger handled manually or via a button that opens state */}
+                        {/* Trigger handled manually or via a button that opens state */}
                     </Dialog>
 
                     {showMobileDrawMenu && (
-                         <div className="absolute bottom-14 right-0 flex flex-col gap-2 animate-in slide-in-from-bottom-2 fade-in duration-200">
-                              <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
-                                  if(drawRef.current) {
-                                      drawRef.current.changeMode('draw_point');
-                                      setIsDrawingMobile(true);
-                                      setShowMobileDrawMenu(false);
-                                      toast.info('Tap map to place point');
-                                  }
-                              }}>
-                                   <MapPin className="h-4 w-4" />
-                              </Button>
-                              <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
-                                  if(drawRef.current) {
-                                      drawRef.current.changeMode('draw_line_string');
-                                      setIsDrawingMobile(true);
-                                      setShowMobileDrawMenu(false);
-                                      toast.info('Tap to draw line');
-                                  }
-                              }}>
-                                   <Route className="h-4 w-4" />
-                              </Button>
-                              <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
-                                  if(drawRef.current) {
-                                      drawRef.current.changeMode('draw_polygon');
-                                      setIsDrawingMobile(true);
-                                      setShowMobileDrawMenu(false);
-                                      toast.info('Tap to draw area');
-                                  }
-                              }}>
-                                   <Square className="h-4 w-4" />
-                              </Button>
-                         </div>
+                        <div className="absolute bottom-14 right-0 flex flex-col gap-2 animate-in slide-in-from-bottom-2 fade-in duration-200">
+                            <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
+                                if (drawRef.current) {
+                                    drawRef.current.changeMode('draw_point');
+                                    setIsDrawingMobile(true);
+                                    setShowMobileDrawMenu(false);
+                                    toast.info('Tap map to place point');
+                                }
+                            }}>
+                                <MapPin className="h-4 w-4" />
+                            </Button>
+                            <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
+                                if (drawRef.current) {
+                                    drawRef.current.changeMode('draw_line_string');
+                                    setIsDrawingMobile(true);
+                                    setShowMobileDrawMenu(false);
+                                    toast.info('Tap to draw line');
+                                }
+                            }}>
+                                <Route className="h-4 w-4" />
+                            </Button>
+                            <Button size="icon" className="rounded-full shadow-lg h-10 w-10" onClick={() => {
+                                if (drawRef.current) {
+                                    drawRef.current.changeMode('draw_polygon');
+                                    setIsDrawingMobile(true);
+                                    setShowMobileDrawMenu(false);
+                                    toast.info('Tap to draw area');
+                                }
+                            }}>
+                                <Square className="h-4 w-4" />
+                            </Button>
+                        </div>
                     )}
 
                     <Button
@@ -1087,28 +1136,28 @@ export default function MapComponent() {
 
             {/* Mobile Drawing Actions (Finish/Cancel) */}
             {isDrawingMobile && (
-                 <div className="md:hidden fixed top-4 left-1/2 -translate-x-1/2 z-40 flex gap-4 bg-background/80 backdrop-blur rounded-full p-2 shadow-lg border">
-                      <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-destructive" onClick={() => {
-                          if(drawRef.current) {
-                              drawRef.current.changeMode('simple_select');
-                              drawRef.current.deleteAll(); // Or just delete the one in progress? usually deleting all clears temp
-                              setIsDrawingMobile(false);
-                          }
-                      }}>
-                          <X className="h-6 w-6" />
-                      </Button>
-                      <Button variant="default" size="icon" className="h-10 w-10 rounded-full bg-green-500 hover:bg-green-600" onClick={() => {
-                          // Mapbox Draw finishes on 'enter' or double click.
-                          // We can programmatically change mode to simple_select to 'finish'
-                          if(drawRef.current) {
-                             drawRef.current.changeMode('simple_select');
-                             // The 'create' event will fire if valid
-                             setIsDrawingMobile(false);
-                          }
-                      }}>
-                          <Check className="h-6 w-6" />
-                      </Button>
-                 </div>
+                <div className="md:hidden fixed top-4 left-1/2 -translate-x-1/2 z-40 flex gap-4 bg-background/80 backdrop-blur rounded-full p-2 shadow-lg border">
+                    <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-destructive" onClick={() => {
+                        if (drawRef.current) {
+                            drawRef.current.changeMode('simple_select');
+                            drawRef.current.deleteAll(); // Or just delete the one in progress? usually deleting all clears temp
+                            setIsDrawingMobile(false);
+                        }
+                    }}>
+                        <X className="h-6 w-6" />
+                    </Button>
+                    <Button variant="default" size="icon" className="h-10 w-10 rounded-full bg-green-500 hover:bg-green-600" onClick={() => {
+                        // Mapbox Draw finishes on 'enter' or double click.
+                        // We can programmatically change mode to simple_select to 'finish'
+                        if (drawRef.current) {
+                            drawRef.current.changeMode('simple_select');
+                            // The 'create' event will fire if valid
+                            setIsDrawingMobile(false);
+                        }
+                    }}>
+                        <Check className="h-6 w-6" />
+                    </Button>
+                </div>
             )}
 
             {/* Mobile Bottom Navigation */}
@@ -1237,12 +1286,12 @@ export default function MapComponent() {
             {/* Mobile Profile View */}
             {mobileTab === 'profile' && (
                 <div className="md:hidden fixed inset-0 z-30 bg-background flex flex-col pb-16">
-                     <div className="p-4 border-b flex justify-between items-center bg-card">
+                    <div className="p-4 border-b flex justify-between items-center bg-card">
                         <h2 className="text-lg font-semibold">Profile</h2>
                     </div>
                     <div className="p-4 space-y-4">
                         <Card>
-                             <CardHeader>
+                            <CardHeader>
                                 <CardTitle className="text-base">{user?.email}</CardTitle>
                             </CardHeader>
                             <CardContent>

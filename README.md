@@ -41,6 +41,8 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 - **Workflow Optimization**: "Create Another" button to quickly add multiple similar features.
 - **Hover Popups**: View feature properties instantly by hovering over map elements.
 - **Sign Up Integration**: Custom modal for new user registration capturing Name and Organization details, fully integrated with Supabase Auth and Profiles.
+- **Export with Spatial Reference**: Export GeoJSON in standard WGS84 or locally projected SVY21 (Singapore) coordinates with automatic transformation.
+- **Unsaved Changes Protection**: Smart alerts prevent accidental data loss when switching features or creating new ones, offering "Save & Continue" or "Discard & Continue" options.
 
 ## Deploy on Vercel
 

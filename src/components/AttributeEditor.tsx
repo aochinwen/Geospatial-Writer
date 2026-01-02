@@ -42,8 +42,9 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         }))
     )
     const { templates, user } = useTemplates()
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [showUnsavedAlert, setShowUnsavedAlert] = useState(false)
     const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
     // Helper to check dirtiness
     const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, unknown>) => {
@@ -75,8 +76,6 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
             props[attr.key] = attr.value
         }
         onSave(featureId, props)
-        // No need to set isDirty(false) because parent will likely update initialProperties
-        // causing re-render/remount or attributes will match new initialProps
     }
 
     const handleApplyTemplate = (templateId: string) => {
@@ -99,6 +98,35 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         toast.success(`Template "${template.name}" applied`)
     }
 
+    // Proceed to create another feature
+    // saveCurrent: if true, saves the current feature first
+    const proceedCreateAnother = (saveCurrent: boolean) => {
+        if (saveCurrent) {
+            handleSave();
+        }
+
+        // Prep props for next feature (using current keys)
+        const props: Record<string, unknown> = {}
+        for (const attr of attributes) {
+            if (!attr.key.trim()) continue
+            props[attr.key] = '' // Reset values for new feature, keep keys
+        }
+
+        if (featureGeometry?.type) {
+            onCreateAnother(featureGeometry.type, props)
+        } else {
+            toast.error("Unknown geometry type")
+        }
+        setShowUnsavedAlert(false);
+    };
+
+    const handleCreateAnotherClick = () => {
+        if (isDirty) {
+            setShowUnsavedAlert(true);
+        } else {
+            proceedCreateAnother(false);
+        }
+    };
 
     // Geometry Helper
     const getGeometryInfo = () => {
@@ -109,7 +137,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
             const [lng, lat] = featureGeometry.coordinates as number[];
             details = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
         } else if (type === 'LineString') {
-            details = `${(featureGeometry.coordinates as number[][]).length} points`; // Maybe show first/last?
+            details = `${(featureGeometry.coordinates as number[][]).length} points`;
         } else if (type === 'Polygon') {
             details = `${(featureGeometry.coordinates as number[][][])[0].length} points (closed)`;
         }
@@ -160,16 +188,6 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                             value={attr.value}
                             onChange={(e) => handleChange(index, 'value', e.target.value)}
                         />
-                        {/* 
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                            onClick={() => handleDelete(index)}
-                        >
-                            <Trash className="h-3 w-3" />
-                        </Button>
-                        */}
                     </div>
                 ))}
             </div>
@@ -224,24 +242,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                     variant="secondary"
                     size="sm"
                     className="w-full"
-                    onClick={() => {
-                        // Ensure saved first if dirty? Or just proceed?
-                        // User said "after created/save", implies we should save first if needed.
-                        if (isDirty) handleSave();
-
-                        // Prep props for next feature (current keys, empty values)
-                        const props: Record<string, unknown> = {}
-                        for (const attr of attributes) {
-                            if (!attr.key.trim()) continue
-                            props[attr.key] = attr.value
-                        }
-
-                        if (featureGeometry?.type) {
-                            onCreateAnother(featureGeometry.type, props)
-                        } else {
-                            toast.error("Unknown geometry type")
-                        }
-                    }}
+                    onClick={handleCreateAnotherClick}
                 >
                     <Plus className="mr-2 h-3 w-3" /> Create Another {featureGeometry?.type}
                 </Button>
@@ -251,18 +252,11 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                         <Button onClick={() => setShowDeleteConfirm(true)} variant="destructive" size="sm" className="w-full">
                             <Trash className="mr-2 h-3 w-3" /> Delete Feature
                         </Button>
-
-                        {/* Custom Delete Modal reusing TemplateManager imports if possible, or simple Dialog */}
-                        <div className="absolute">
-                            {/* Hack: The Dialog requires standard imports. We'll rely on the one imported in Map or just minimal state here if we had the components. 
-                                Actually, we don't import Dialog components here yet. Need to add imports.
-                             */}
-                        </div>
                     </>
                 )}
             </div>
 
-            {/* Delete Dialog - rendered via Portal if possible, or just standard Dialog if we add imports */}
+            {/* Delete Dialog */}
             {onDelete && (
                 <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
                     <DialogContent>
@@ -282,6 +276,25 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                     </DialogContent>
                 </Dialog>
             )}
+
+            {/* Unsaved Changes Alert Dialog */}
+            <Dialog open={showUnsavedAlert} onOpenChange={setShowUnsavedAlert}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Unsaved Changes</DialogTitle>
+                        <DialogDescription>
+                            You have unsaved changes to this feature. Do you want to save them before creating another feature?
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="sm:justify-between gap-2">
+                        <div className="flex gap-2">
+                            <Button variant="secondary" onClick={() => setShowUnsavedAlert(false)}>Cancel</Button>
+                            <Button variant="destructive" onClick={() => proceedCreateAnother(false)}>Discard & Continue</Button>
+                        </div>
+                        <Button onClick={() => proceedCreateAnother(true)}>Save & Continue</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
