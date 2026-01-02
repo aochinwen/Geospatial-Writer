@@ -28,7 +28,7 @@ interface AttributeEditorProps {
     featureId: string
     initialProperties: Record<string, unknown>
     featureGeometry?: Geometry // GeoJSON Geometry
-    onSave: (id: string, properties: Record<string, unknown>) => void
+    onSave: (id: string, properties: Record<string, unknown>) => Promise<void>
     onDelete?: () => void
     onCreateAnother: (geometryType: string, currentProps: Record<string, unknown>) => void
     onClose: () => void
@@ -45,6 +45,7 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     const [showUnsavedAlert, setShowUnsavedAlert] = useState(false)
     const [selectedTemplate, setSelectedTemplate] = useState<string>('')
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [isSaving, setIsSaving] = useState(false)
 
     // Helper to check dirtiness
     const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, unknown>) => {
@@ -69,13 +70,18 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         setAttributes(newAttrs)
     }
 
-    const handleSave = () => {
-        const props: Record<string, unknown> = {}
-        for (const attr of attributes) {
-            if (!attr.key.trim()) continue
-            props[attr.key] = attr.value
+    const handleSave = async () => {
+        setIsSaving(true)
+        try {
+            const props: Record<string, unknown> = {}
+            for (const attr of attributes) {
+                if (!attr.key.trim()) continue
+                props[attr.key] = attr.value
+            }
+            await onSave(featureId, props)
+        } finally {
+            setIsSaving(false)
         }
-        onSave(featureId, props)
     }
 
     const handleApplyTemplate = (templateId: string) => {
@@ -100,9 +106,9 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
 
     // Proceed to create another feature
     // saveCurrent: if true, saves the current feature first
-    const proceedCreateAnother = (saveCurrent: boolean) => {
+    const proceedCreateAnother = async (saveCurrent: boolean) => {
         if (saveCurrent) {
-            handleSave();
+            await handleSave();
         }
 
         // Prep props for next feature (using current keys)
@@ -233,8 +239,8 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                     )}
                 </div>
 
-                <Button onClick={handleSave} size="sm" className="w-full" disabled={!isDirty}>
-                    <Save className="mr-2 h-3 w-3" /> Save Changes
+                <Button onClick={handleSave} size="sm" className="w-full" disabled={!isDirty || isSaving}>
+                    <Save className="mr-2 h-3 w-3" /> {isSaving ? 'Saving...' : 'Save Changes'}
                 </Button>
 
 
