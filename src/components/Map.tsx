@@ -22,6 +22,9 @@ import { Feature } from '@/types'
 import { convertGeoJSON, SPATIAL_REFERENCES, SpatialReference } from '@/utils/coordinates'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { ConfigModal } from '@/components/ConfigModal'
+import { getMapDrawStyles } from '@/components/map-styles'
+import { UserPreferences } from '@/types'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 
@@ -38,13 +41,14 @@ interface DrawControlProps {
     displayControlsDefault?: boolean
     controls?: Record<string, boolean>
     forwardedRef?: React.Ref<MapboxDraw>
+    styles?: object[]
 }
 
 function DrawControl(props: DrawControlProps) {
     const { onCreate, onUpdate, onDelete, onSelectionChange, forwardedRef, ...drawOptions } = props;
 
     const draw = useControl<MapboxDraw>(
-        () => new MapboxDraw(drawOptions),
+        () => new MapboxDraw({ ...drawOptions, userProperties: true }),
         ({ map }: { map: MapRef }) => {
             if (onCreate) map.on('draw.create', onCreate)
             if (onUpdate) map.on('draw.update', onUpdate)
@@ -100,6 +104,23 @@ export default function MapComponent() {
     const [mobileEditMode, setMobileEditMode] = React.useState(false)
     const [showMobileDrawMenu, setShowMobileDrawMenu] = React.useState(false)
 
+    // User Preferences
+    const [isConfigOpen, setIsConfigOpen] = React.useState(false)
+    const [userPreferences, setUserPreferences] = React.useState<UserPreferences>({
+        point_color: '#3bb2d0',
+        point_size: 5,
+        point_outline_color: '#ffffff',
+        point_outline_width: 2,
+        polyline_color: '#3bb2d0',
+        polyline_width: 2,
+        polygon_fill_color: '#3bb2d0',
+        polygon_fill_opacity: 0.1,
+        polygon_outline_color: '#3bb2d0',
+        polygon_outline_width: 2
+    })
+
+    const drawStyles = React.useMemo(() => getMapDrawStyles(userPreferences), [userPreferences])
+
     // Capture features from Context (DB) OR from Draw updates
     // Actually, simple solution: whenever Draw updates (Create, Delete, Update), we set 'featuresList' 
     // from drawRef.current.getAll().
@@ -122,6 +143,28 @@ export default function MapComponent() {
     const isSwapping = React.useRef(false)
     const [hoverInfo, setHoverInfo] = React.useState<{ longitude: number, latitude: number, feature: Feature } | null>(null)
     const [exportCRS, setExportCRS] = React.useState<SpatialReference>('WGS84')
+
+    // EFFECT: Fetch User Preferences
+    React.useEffect(() => {
+        const fetchPreferences = async () => {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+                const { data } = await supabase
+                    .from('user_preferences')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .single()
+
+                if (data) {
+                    // Normalize keys to match UserPreferences interface if needed, 
+                    // dependent on how Supabase returns data vs TypeScript type.
+                    // Assuming direct match for now.
+                    setUserPreferences(prev => ({ ...prev, ...data }))
+                }
+            }
+        }
+        fetchPreferences()
+    }, [supabase])
 
     // EFFECT: Handle Project Switching - Load Data
     const selectedFeatureIdRef = React.useRef(selectedFeatureId)
@@ -190,19 +233,29 @@ export default function MapComponent() {
             }
             syncFeaturesList()
         }
-    }, [activeProject, dbFeatures, syncFeaturesList]) // Dependency list separate from logic
+    }, [activeProject, dbFeatures, syncFeaturesList, userPreferences]) // Dependency list separate from logic
 
 
     // Supabase Helpers
     const insertFeature = React.useCallback(async (feature: Feature, projectId: string) => {
         try {
-            const { data, error } = await supabase.from('features').insert({
+            // Respect client-side ID if it is a valid UUID
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(feature.id as string);
+
+            const payload = {
                 project_id: projectId,
                 geometry: feature.geometry,
-                properties: feature.properties || {}
-            }).select().single()
+                properties: feature.properties || {},
+                ...(isUUID ? { id: feature.id } : {})
+            }
+
+            const { data, error } = await supabase.from('features').insert(payload)
+                .select()
+                .maybeSingle()
 
             if (error) throw error
+            if (!data) throw new Error('Insert successful but no data returned (RLS?)')
+
             return data
         } catch (error) {
             console.error('Insert error:', error)
@@ -725,10 +778,46 @@ export default function MapComponent() {
                             <Button variant="destructive" size="sm" className="w-full text-xs h-8" onClick={handleSignOut}>
                                 <LogOut className="mr-2 h-3 w-3" /> Sign Out
                             </Button>
+                            <Button variant="outline" size="sm" className="w-full text-xs h-8" onClick={() => setIsConfigOpen(true)}>
+                                <Edit className="mr-2 h-3 w-3" /> Settings
+                            </Button>
                         </CardContent>
                     </Card>
                 )}
             </div>
+
+            <ConfigModal
+                open={isConfigOpen}
+                onOpenChange={setIsConfigOpen}
+                initialPreferences={userPreferences}
+                onSave={(prefs) => {
+                    setUserPreferences(prefs)
+                    // Force refresh of map styles if needed, though data-driven styles should update 
+                    // automatically if we were using 'setPaintProperty', but here we are using Draw styles
+                    // which read from feature properties. 
+
+                    // WAIT: The map styles use ['get', 'user_point_color']. This means they read from the FEATURE properties.
+                    // But changing global preferences shouldn't necessarily change EXISTING features unless we update them 
+                    // or if we want the "default" to apply to features that don't have overrides.
+                    // 
+                    // However, my map styles use 'coalesce' with a hardcoded fallback. 
+                    // To make global prefs apply to existing features that use defaults, we'd need to update the style definition dynamically.
+                    // Mapbox Draw doesn't easily support dynamic style updates at runtime without re-creating the control.
+                    //
+                    // ALTERNATIVE: We can update the FEATURE properties of all features to match new defaults? 
+                    // Or better, we should inject the Current Global Prefs as the 'fallback' in the style itself? 
+                    // But 'styles' prop is passed to DrawControl once. 
+                    //
+                    // Valid approach: Remount DrawControl when styles change? Or just use feature properties for everything.
+                    // User requested: "change default properties". This usually implies for NEW features. 
+                    // If they want to change existing ones, they might expect that too.
+                    // Let's stick to "Defaults for NEW features" for now as per "change the default properties".
+                    // But if I want to see the change immediately, I might expect it to apply to things I just drew.
+
+                    // For now, I will just update the state so NEW features get these props.
+                    toast.success('Preferences updated for new features')
+                }}
+            />
 
             <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
                 <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
@@ -889,14 +978,16 @@ export default function MapComponent() {
                     </div>
                     <ForwardedDrawControl
                         ref={drawRef}
+                        key={JSON.stringify(userPreferences)}
                         position="top-right"
                         displayControlsDefault={false}
                         controls={{
-                            polygon: true,
-                            trash: true,
                             point: true,
-                            line_string: true
+                            line_string: true,
+                            polygon: true,
+                            trash: true
                         }}
+                        styles={drawStyles}
                         onCreate={stableOnCreate}
                         onUpdate={stableOnUpdate}
                         onDelete={stableOnDelete}
