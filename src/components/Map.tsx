@@ -5,6 +5,7 @@ import MapGL, { NavigationControl, useControl, MapRef, Popup, ControlPosition } 
 import MapboxDraw from '@mapbox/mapbox-gl-draw'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css'
+import { processGeoJSON, ImportResult } from '@/utils/geoImport';
 import { useProject } from '@/context/ProjectContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label'
 import { ConfigModal } from '@/components/ConfigModal'
 import { getMapDrawStyles } from '@/components/map-styles'
+import { Loader2, Upload } from 'lucide-react'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { UserPreferences } from '@/types'
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
@@ -95,8 +98,18 @@ export default function MapComponent() {
     const [selectedFeatureProps, setSelectedFeatureProps] = React.useState<Record<string, unknown>>({})
     const [featuresList, setFeaturesList] = React.useState<Feature[]>([])
     // New: for "Create Another" workflow
-    const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, unknown> | null>(null)
-    const [showUserMenu, setShowUserMenu] = React.useState(false)
+    const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, unknown> | null>(null);
+
+    // Import State
+    const [importData, setImportData] = React.useState<ImportResult | null>(null);
+    const [isImportDialogOpen, setIsImportDialogOpen] = React.useState(false);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const [isImporting, setIsImporting] = React.useState(false);
+    const [showUserMenu, setShowUserMenu] = React.useState(false);
+
+
+
+
 
     // Mobile State
     const [mobileTab, setMobileTab] = React.useState<'map' | 'projects' | 'profile' | 'templates'>('map')
@@ -137,6 +150,76 @@ export default function MapComponent() {
     const supabase = createClient()
     const router = useRouter()
     const { user } = useProject()
+
+    // Bulk Insert for Import
+    const insertFeatures = React.useCallback(async (features: Feature[], projectId: string) => {
+        try {
+            const payload = features.map(f => ({
+                project_id: projectId,
+                geometry: f.geometry,
+                properties: f.properties || {},
+                id: f.id // Use the UUID we generated
+            }));
+
+            const { data, error } = await supabase.from('features').insert(payload).select();
+
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Bulk insert error:', error);
+            throw error;
+        }
+    }, [supabase]);
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !activeProject) return;
+
+        // Reset input value so same file can be selected again
+        e.target.value = '';
+
+        try {
+            const result = await processGeoJSON(file, activeProject.id);
+            setImportData(result);
+            setIsImportDialogOpen(true);
+        } catch (error) {
+            toast.error((error as Error).message);
+        }
+    };
+
+    const confirmImport = async () => {
+        if (!importData || !activeProject) return;
+
+        setIsImporting(true);
+        try {
+            if (importData.validFeatures.length > 0) {
+                await insertFeatures(importData.validFeatures, activeProject.id);
+                toast.success(`Successfully imported ${importData.validFeatures.length} features.`);
+                refreshFeatures();
+            }
+
+            if (importData.errors.length > 0) {
+                const errorContent = importData.errors.join('\n');
+                const blob = new Blob([errorContent], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'import_errors.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toast.warning('Some features failed to import. Error report generated.');
+            }
+        } catch (error) {
+            console.error(error);
+            toast.error('Failed to save imported features.');
+        } finally {
+            setIsImporting(false);
+            setIsImportDialogOpen(false);
+            setImportData(null);
+        }
+    };
 
 
 
@@ -719,6 +802,25 @@ export default function MapComponent() {
                     <CardHeader className="p-4 pb-2 shrink-0">
                         <div className="flex items-center justify-between">
                             <CardTitle className="text-sm font-medium uppercase text-muted-foreground">Features ({dbFeatures.length})</CardTitle>
+                            <div className="flex gap-1">
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    className="hidden"
+                                    accept=".json,.geojson"
+                                    onChange={handleFileUpload}
+                                />
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    title="Import GeoJSON"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={!activeProject}
+                                >
+                                    <Upload className="h-4 w-4" />
+                                </Button>
+                            </div>
                         </div>
                     </CardHeader>
                     <CardContent className="p-2 pt-0 overflow-y-auto flex-1">
@@ -1395,6 +1497,49 @@ export default function MapComponent() {
                 </div>
             )}
 
+            {/* Import Confirmation Dialog */}
+            <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Import Features</DialogTitle>
+                        <DialogDescription>
+                            Review the features found in the uploaded file.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                            <div className="flex items-center gap-2">
+                                <Check className="h-5 w-5 text-green-500" />
+                                <span className="font-medium">Valid Features</span>
+                            </div>
+                            <span className="text-lg font-bold">{importData?.validFeatures.length || 0}</span>
+                        </div>
+
+                        {importData?.errors.length ? (
+                            <Alert variant="destructive">
+                                <AlertTitle>Validation Errors</AlertTitle>
+                                <AlertDescription>
+                                    {importData.errors.length} features were invalid and will be skipped.
+                                    An error report will be generated.
+                                </AlertDescription>
+                            </Alert>
+                        ) : null}
+
+                        <div className="text-sm text-muted-foreground">
+                            Target Project: <span className="font-semibold text-foreground">{activeProject?.name}</span>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} disabled={isImporting}>Cancel</Button>
+                        <Button onClick={confirmImport} disabled={isImporting || !importData || importData.validFeatures.length === 0}>
+                            {isImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Import {importData?.validFeatures.length} Features
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div >
     )
 }

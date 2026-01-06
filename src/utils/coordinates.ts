@@ -32,6 +32,7 @@ const projectCoordinate = (coords: any[], from: string, to: string): any[] => {
 
 /**
  * Converts a GeoJSON FeatureCollection to the target Spatial Reference
+ * Used for Export
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const convertGeoJSON = (geoJSON: any, targetCRS: SpatialReference) => {
@@ -65,4 +66,44 @@ export const convertGeoJSON = (geoJSON: any, targetCRS: SpatialReference) => {
     };
 
     return result;
+};
+
+/**
+ * Converts a GeoJSON FeatureCollection FROM a specific Spatial Reference TO WGS84
+ * Used for Import
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const convertToWGS84 = (geoJSON: any) => {
+    // Check for CRS in GeoJSON
+    const crsName = geoJSON.crs?.properties?.name;
+    let sourceProj = WGS84; // Default to WGS84 if no CRS is specified
+
+    if (crsName) {
+        if (crsName.includes('EPSG::3414') || crsName.includes('EPSG:3414') || crsName.includes('urn:ogc:def:crs:EPSG::3414')) {
+            sourceProj = 'EPSG:3414';
+        }
+        // Add more CRS checks here as needed
+    }
+
+    if (sourceProj === WGS84) {
+        return geoJSON;
+    }
+
+    const newFeatures = (geoJSON.features || []).map((f: any) => {
+        if (!f.geometry) return f;
+
+        const newGeometry = { ...f.geometry };
+        newGeometry.coordinates = projectCoordinate(f.geometry.coordinates, sourceProj, WGS84);
+
+        return {
+            ...f,
+            geometry: newGeometry
+        };
+    });
+
+    return {
+        ...geoJSON,
+        features: newFeatures,
+        crs: null // Remove or update CRS to WGS84
+    };
 };
