@@ -44,6 +44,7 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 - **Export with Spatial Reference**: Export GeoJSON in standard WGS84 or locally projected SVY21 (Singapore) coordinates with automatic transformation.
 - **Unsaved Changes Protection**: Smart alerts prevent accidental data loss when switching features or creating new ones, offering "Save & Continue" or "Discard & Continue" options.
 - **Global User Preferences**: Customize map aesthetics with a centralized configuration panel. Adjust point sizes, colors, and outline widths globally, with settings persisted to your user profile.
+- **GeoJSON Upload**: Import features from GeoJSON files with automatic validation and CRS conversion.
 
 ## Deploy on Vercel
 
