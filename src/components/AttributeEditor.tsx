@@ -27,14 +27,15 @@ export type KeyValue = {
 interface AttributeEditorProps {
     featureId: string
     initialProperties: Record<string, unknown>
-    featureGeometry?: Geometry // GeoJSON Geometry
-    onSave: (id: string, properties: Record<string, unknown>) => Promise<void>
+    featureGeometry?: Geometry // Current/Live Geometry from map
+    originalGeometry?: Geometry // Original Geometry at start of selection
+    onSave: (id: string, properties: Record<string, unknown>, geometry?: Geometry) => Promise<void>
     onDelete?: () => void
     onCreateAnother: (geometryType: string, currentProps: Record<string, unknown>) => void
     onClose: () => void
 }
 
-export default function AttributeEditor({ featureId, initialProperties, featureGeometry, onSave, onDelete, onClose, onCreateAnother }: AttributeEditorProps) {
+export default function AttributeEditor({ featureId, initialProperties, featureGeometry, originalGeometry, onSave, onDelete, onClose, onCreateAnother }: AttributeEditorProps) {
     const [attributes, setAttributes] = useState<KeyValue[]>(() =>
         Object.entries(initialProperties).map(([key, value]) => ({
             key,
@@ -48,7 +49,8 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
     const [isSaving, setIsSaving] = useState(false)
 
     // Helper to check dirtiness
-    const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, unknown>) => {
+    const checkDirty = (currentAttrs: KeyValue[], initialProps: Record<string, unknown>, currentGeom?: Geometry, originalGeom?: Geometry) => {
+        // 1. Check Properties
         const currentObj: Record<string, string> = {};
         currentAttrs.forEach(a => { if (a.key.trim()) currentObj[a.key] = a.value });
 
@@ -59,10 +61,18 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
         for (const key in currentObj) {
             if (currentObj[key] !== initialObj[key]) return true;
         }
+
+        // 2. Check Geometry (Deep Check)
+        if (currentGeom && originalGeom) {
+            if (JSON.stringify(currentGeom.coordinates) !== JSON.stringify(originalGeom.coordinates)) {
+                return true;
+            }
+        }
+
         return false;
     };
 
-    const isDirty = checkDirty(attributes, initialProperties);
+    const isDirty = checkDirty(attributes, initialProperties, featureGeometry, originalGeometry);
 
     const handleChange = (index: number, field: 'key' | 'value', value: string) => {
         const newAttrs = [...attributes]
@@ -78,7 +88,8 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                 if (!attr.key.trim()) continue
                 props[attr.key] = attr.value
             }
-            await onSave(featureId, props)
+            // Pass Geometry too if available
+            await onSave(featureId, props, featureGeometry)
         } finally {
             setIsSaving(false)
         }
@@ -176,6 +187,10 @@ export default function AttributeEditor({ featureId, initialProperties, featureG
                         <span className="font-medium text-muted-foreground">Location:</span>
                         <span className="truncate max-w-[150px]" title={geoInfo.details}>{geoInfo.details}</span>
                     </div>
+                    {/* Add Warning if location moved */}
+                    {isDirty && JSON.stringify(featureGeometry?.coordinates) !== JSON.stringify(originalGeometry?.coordinates) && (
+                        <div className="text-amber-500 font-semibold italic">Location Changed (Unsaved)</div>
+                    )}
                 </div>
             )}
 

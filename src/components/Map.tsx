@@ -96,6 +96,8 @@ export default function MapComponent() {
     const [isPreviewOpen, setIsPreviewOpen] = React.useState(false)
     const [selectedFeatureId, setSelectedFeatureId] = React.useState<string | null>(null)
     const [selectedFeatureProps, setSelectedFeatureProps] = React.useState<Record<string, unknown>>({})
+    const [originalGeometry, setOriginalGeometry] = React.useState<Geometry | undefined>(undefined) // State for UI
+    const originalGeometryRef = React.useRef<Geometry | undefined>(undefined) // Ref for logic
     const [featuresList, setFeaturesList] = React.useState<Feature[]>([])
     // New: for "Create Another" workflow
     const [pendingTemplate, setPendingTemplate] = React.useState<Record<string, unknown> | null>(null);
@@ -384,24 +386,12 @@ export default function MapComponent() {
     // Handlers
     const onUpdate = React.useCallback(async (e: DrawEvent) => {
         const { features } = e
-        for (const feature of features) {
-            if (activeProject && feature.id) {
-                // Ensure it's a valid UUID before trying to update DB
-                // (Mapbox Draw creates short IDs for new features, but our 'onCreate' should have swapped them)
-                // If we somehow get a non-UUID here, it means it's a local session feature or sync failed.
-                const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(feature.id as string);
+        // DISABLED AUTO-SAVE for geometry updates
+        // We now rely on manual save (via AttributeEditor) or revert (via onSelectionChange/Close)
 
-                if (isUUID) {
-                    try {
-                        await updateFeature(feature.id, { geometry: feature.geometry })
-                    } catch {
-                        toast.error('Failed to sync update')
-                    }
-                }
-            }
-        }
+        // Just sync list so UI sees new geometry
         syncFeaturesList()
-    }, [activeProject, syncFeaturesList, updateFeature])
+    }, [syncFeaturesList])
 
     const onCreate = React.useCallback(async (e: DrawEvent) => {
         console.log('onCreate triggered', e);
@@ -455,8 +445,13 @@ export default function MapComponent() {
 
                     // Select the new feature immediately so UI is ready
                     drawRef.current.changeMode('simple_select', { featureIds: [newId] });
+
+                    // Update State & Refs immediately for the new selection
                     setSelectedFeatureId(newId);
                     setSelectedFeatureProps(newFeature.properties);
+                    setOriginalGeometry(newFeature.geometry);
+                    originalGeometryRef.current = newFeature.geometry;
+
                 } finally {
                     setTimeout(() => {
                         isSwapping.current = false;
@@ -525,23 +520,94 @@ export default function MapComponent() {
         }
         if (activeProject) refreshFeatures()
         setSelectedFeatureId(null)
+        setOriginalGeometry(undefined)
+        originalGeometryRef.current = undefined;
         syncFeaturesList()
     }, [activeProject, refreshFeatures, syncFeaturesList, deleteFeature])
 
+    // Helper to check and revert
+    const checkAndRevert = React.useCallback((currentSelectedIds?: string[]) => {
+        const prevId = selectedFeatureIdRef.current;
+
+        if (!prevId) return;
+        if (!drawRef.current) return;
+        if (!originalGeometryRef.current) return;
+
+        // Use explicit list if provided, otherwise ask Draw
+        const selectedIds = currentSelectedIds || drawRef.current.getSelectedIds();
+
+        // If currently selected, don't revert (user is interacting/dragging it)
+        if (selectedIds.includes(prevId)) return;
+
+        const prevFeature = drawRef.current.get(prevId);
+        if (!prevFeature) return;
+
+        const currentGeomStr = JSON.stringify(prevFeature.geometry.coordinates);
+        const originalGeomStr = JSON.stringify(originalGeometryRef.current.coordinates);
+
+        if (currentGeomStr !== originalGeomStr) {
+            console.log('Reverting unsaved feature movement', prevId);
+            drawRef.current.add({
+                ...prevFeature,
+                geometry: originalGeometryRef.current
+            });
+            syncFeaturesList();
+            toast.info("Feature move reverted (unsaved)");
+        }
+    }, [syncFeaturesList]);
+
     const onSelectionChange = React.useCallback((e: DrawEvent) => {
+        const { features } = e
+        const currentIds = features.map(f => f.id as string);
+
         if (isSwapping.current) return;
 
-        const { features } = e
-        console.log('onSelectionChange', features.length, features[0]?.id);
+        // 1. Check Revert First (pass authoritative new selection)
+        checkAndRevert(currentIds);
 
+        // 2. Setup New Selection
         if (features.length > 0) {
             const f = features[0]
             setSelectedFeatureId(f.id)
             setSelectedFeatureProps(f.properties || {})
+
+            // Deep clone geometry to avoid reference mutation issues
+            const geomClone = JSON.parse(JSON.stringify(f.geometry));
+            setOriginalGeometry(geomClone);
+            originalGeometryRef.current = geomClone;
         } else {
             setSelectedFeatureId(null)
+            setOriginalGeometry(undefined)
+            originalGeometryRef.current = undefined;
         }
-    }, [])
+    }, [checkAndRevert])
+
+    // Fallback Map Click Listener
+    const onMapClick = React.useCallback((e: mapboxgl.MapLayerMouseEvent) => {
+        // We need to know if we clicked on a feature or empty map
+        if (!drawRef.current) return;
+
+        // Check if we hit a draw feature
+        const hitFeatures = mapRef.current?.queryRenderedFeatures(e.point);
+        const hitDrawFeature = hitFeatures?.some(f => f.source.includes('mapbox-gl-draw'));
+
+        setTimeout(() => {
+            // If we didn't hit a draw feature, we assume Deselect All.
+            if (!hitDrawFeature) {
+                checkAndRevert([]);
+
+                // Also ensure state is cleared if Draw failed to fire event
+                if (selectedFeatureIdRef.current) {
+                    if (drawRef.current) drawRef.current.changeMode('simple_select', { featureIds: [] });
+                    setSelectedFeatureId(null);
+                    setOriginalGeometry(undefined);
+                    originalGeometryRef.current = undefined;
+                }
+            } else {
+                checkAndRevert();
+            }
+        }, 200);
+    }, [checkAndRevert]);
 
     // Event Refs to avoid stale closures in Mapbox listeners
     const onCreateRef = React.useRef(onCreate);
@@ -561,7 +627,7 @@ export default function MapComponent() {
     const stableOnDelete = React.useCallback((e: DrawEvent) => onDeleteRef.current(e), []);
     const stableOnSelectionChange = React.useCallback((e: DrawEvent) => onSelectionChangeRef.current(e), []);
 
-    const handleAttributeSave = async (id: string, newProps: Record<string, unknown>) => {
+    const handleAttributeSave = async (id: string, newProps: Record<string, unknown>, newGeometry?: Geometry) => {
         if (!activeProject) return;
 
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -569,7 +635,18 @@ export default function MapComponent() {
         if (isUUID) {
             // Existing Feature: Update
             try {
-                await updateFeature(id, { properties: newProps })
+                // Update properties AND geometry if updated
+                const updates: Partial<Feature> = { properties: newProps };
+                if (newGeometry) updates.geometry = newGeometry;
+
+                await updateFeature(id, updates)
+
+                // Update refs to new authoritative state
+                if (newGeometry) {
+                    setOriginalGeometry(newGeometry);
+                    originalGeometryRef.current = newGeometry;
+                }
+
                 refreshFeatures() // REFRESH CONTEXT so Popup sees new props immediately
                 toast.success('Changes saved successfully')
             } catch {
@@ -589,6 +666,7 @@ export default function MapComponent() {
             const featureToSave = {
                 ...feature,
                 properties: { ...feature.properties, ...newProps },
+                geometry: newGeometry || feature.geometry,
                 project_id: activeProject.id
             } as Feature;
 
@@ -612,8 +690,11 @@ export default function MapComponent() {
 
                 // Update UI selection
                 drawRef.current.changeMode('simple_select', { featureIds: [data.id] });
+
                 setSelectedFeatureId(data.id);
                 setSelectedFeatureProps(data.properties);
+                setOriginalGeometry(data.geometry);
+                originalGeometryRef.current = data.geometry;
 
                 toast.success('Changes saved successfully');
                 refreshFeatures();
@@ -627,14 +708,15 @@ export default function MapComponent() {
 
         // Update Local Map State (if not already handled by swap)
         // If we swapped, we already added newFeatureLocal with newProps.
-        // If we updated, we need to update local props.
+        // If we updated, we need to update local props/geometry.
         if (drawRef.current && isUUID) {
             const f = drawRef.current.get(id)
             if (f) {
                 drawRef.current.add({
                     ...f,
                     type: 'Feature',
-                    properties: newProps
+                    properties: newProps,
+                    geometry: newGeometry || f.geometry
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } as any)
             }
@@ -1071,6 +1153,7 @@ export default function MapComponent() {
                     onMove={evt => setViewState(evt.viewState)}
                     onMouseMove={onHover}
                     onMouseLeave={() => setHoverInfo(null)}
+                    onClick={onMapClick}
                     style={{ width: '100%', height: '100%' }}
                     mapStyle="mapbox://styles/mapbox/streets-v11"
                     mapboxAccessToken={TOKEN}
@@ -1159,6 +1242,7 @@ export default function MapComponent() {
                                 featuresList.find(f => f.id === selectedFeatureId)?.geometry ||
                                 dbFeatures.find(f => f.id === selectedFeatureId)?.geometry
                             } // Pass geometry
+                            originalGeometry={originalGeometry}
                             onSave={handleAttributeSave}
                             onDelete={() => {
                                 // Double confirmation removed - AttributeEditor handles the UI
@@ -1172,7 +1256,15 @@ export default function MapComponent() {
                                 }
                             }}
                             onClose={() => {
+                                // 1. Check revert explicitly assuming deselect
+                                checkAndRevert([]);
+
+                                // 2. Clear State
                                 setSelectedFeatureId(null)
+                                setOriginalGeometry(undefined)
+                                originalGeometryRef.current = undefined;
+
+                                // 3. Clear Mapbox Draw Selection
                                 if (drawRef.current) {
                                     drawRef.current.changeMode('simple_select', { featureIds: [] })
                                 }
@@ -1256,6 +1348,7 @@ export default function MapComponent() {
                                 featuresList.find(f => f.id === selectedFeatureId)?.geometry ||
                                 dbFeatures.find(f => f.id === selectedFeatureId)?.geometry
                             }
+                            originalGeometry={originalGeometry}
                             onSave={handleAttributeSave}
                             onDelete={() => {
                                 onDelete({ features: [{ id: selectedFeatureId } as Feature] })
@@ -1265,7 +1358,15 @@ export default function MapComponent() {
                                     setMobileEditMode(false)
                                 }
                             }}
-                            onClose={() => setMobileEditMode(false)}
+                            onClose={() => {
+                                setMobileEditMode(false)
+                                // Trigger check for revert via selection change or manual check
+                                // Since we just close render mode here, we should ideally trigger revert
+                                // logic if we are not just hiding the panel but deselecting.
+                                // But on mobile, closing edit mode might not deselect? 
+                                // Let's assume closing edit mode keeps selection for now, 
+                                // or if it deselects, onSelectionChange will handle revert.
+                            }}
                             onCreateAnother={(type, props) => {
                                 setMobileEditMode(false)
                                 handleCreateAnother(type, props)
